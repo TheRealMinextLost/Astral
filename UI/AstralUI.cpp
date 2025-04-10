@@ -68,133 +68,118 @@ void AstralUI::createUI() {
         ImGui::ShowDemoWindow(&m_showDemoWindow);
     }
 
-    // Render our custom UI windows
+    renderMainPanel();
+
+    /*// Render our custom UI windows
     renderControlPanel();
     renderCameraControls();
     renderObjectManipulation();
-    renderInfoPanel();
+    renderInfoPanel();*/
 }
 
-void AstralUI::renderControlPanel() {
-    ImGui::Begin("Render Controls");
+void AstralUI::renderMainPanel() {
 
-    ImGui::Text("Rotation Controls");
-    ImGui::SliderFloat("Rotation Speed", &m_params.rotationSpeed, 0.0f, 2.0f);
-    ImGui::SliderFloat3("Rotation Axis", m_params.rotationAxis, -1.0f, 1.0f);
-    ImGui::Checkbox("Animate Rotation", &m_params.animateRotation);
+    ImGui::Begin("Astral Settings"); // Start single panel
 
-    ImGui::Separator();
 
-    ImGui::Text("Scene Settings");
-    ImGui::ColorEdit3("Clear Color", m_params.clearColor);
-    ImGui::SliderFloat("Field of View", &m_params.fov, 10.0f, 120.0f);
+    ImGui::Separator(); // Separate sections
+
+    // Scene settings
+    if (ImGui::CollapsingHeader("Scene Settings", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::ColorEdit3("Clear Color", m_params.clearColor);
+        ImGui::SliderFloat("Field of View", &m_params.fov, 10.0f, 120.0f);
+    }
+
+    ImGui::Separator(); // Separate sections
+
+    // Camera controls
+    if (ImGui::CollapsingHeader("Camera Controls", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::SliderFloat3("Camera Position", m_params.cameraPos, -10.0f, 10.0f);
+        ImGui::SliderFloat3("Camera Target", m_params.cameraTarget, -10.0f, 10.0f);
+
+        if (ImGui::Button("Reset Camera")) {
+            m_params.cameraPos[0] = 0.0f; m_params.cameraPos[1] = 0.0f; m_params.cameraPos[2] = 5.0f;
+            m_params.cameraTarget[0] = 0.0f; m_params.cameraTarget[1] = 0.0f; m_params.cameraTarget[2] = 0.0f;
+        }
+
+        // Camera orbit controls (kept static as they are UI state)
+        static bool orbitCamera = false;
+        static float orbitSpeed = 0.5f;
+        static float orbitRadius = 5.0f;
+        static float orbitHeight = 0.0f;
+
+        ImGui::Separator(); // Separate sections
+        ImGui::Checkbox("Orbit Camera", &orbitCamera);
+
+        if (orbitCamera) {
+            ImGui::SliderFloat("Orbit Speed", &orbitSpeed, 0.1f, 2.0f);
+            ImGui::SliderFloat("Orbit Radius", &orbitRadius, 1.0f, 10.0f);
+            ImGui::SliderFloat("Orbit Height", &orbitHeight, -5.0f, 5.0f);
+
+            // calculate orbit position
+            float time = (float)glfwGetTime();
+            m_params.cameraPos[0] = sin(time * orbitSpeed) * orbitRadius;
+            m_params.cameraPos[1] = orbitHeight;
+            m_params.cameraPos[2] = cos(time * orbitSpeed) * orbitRadius;
+        }
+    }
+
+    ImGui::Separator(); // separate sections
+
+    if (ImGui::CollapsingHeader("Object Manipulation", ImGuiTreeNodeFlags_DefaultOpen)) {
+        // sphere scale slider
+        ImGui::Text("sphere Transformation");
+        ImGui::SliderFloat("Radius", &m_params.sphereRadius, 0.1f, 3.0f);
+        ImGui::SliderFloat3("Position", m_params.spherePosition, -5.0f, 5.0f);
+
+        ImGui::Separator();
+
+        // sphere color
+        ImGui::Text("sphere Appearance");
+        ImGui::ColorEdit3("Color", m_params.sphereColor);
+
+        // Presets
+        ImGui::Separator();
+        ImGui::Text("Presets");
+        if (ImGui::Button("Default")) {
+            m_params.sphereRadius = 1.0f;
+            m_params.spherePosition[0] = 0.0f; m_params.spherePosition[1] = 0.0f; m_params.spherePosition[2] = 0.0f;
+            m_params.sphereColor[0] = 1.0f; m_params.sphereColor[1] = 1.0f; m_params.sphereColor[2] = 1.0f;
+        }
+    }
+
+    ImGui::Separator(); // Separate section
+
+    // Info Panel
+    if (ImGui::CollapsingHeader("Info", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGuiIO& io = ImGui::GetIO(); // Get IO context
+
+        //Update frame time history
+        m_frameTimes[m_frameTimeIndex] = io.Framerate > 0 ? (1000.0f / io.Framerate) : 0.0f;
+        m_frameTimeIndex = (m_frameTimeIndex + 1) % IM_ARRAYSIZE(m_frameTimes);
+
+        ImGui::Text("FPS: %.1f", io.Framerate);
+        ImGui::Text("Frame Time: %.3f ms", io.Framerate > 0 ? (1000.0f / io.Framerate) : 0.0f);
+
+        // Plot frame times
+        ImGui::PlotLines("Frame Times", m_frameTimes, IM_ARRAYSIZE(m_frameTimes), m_frameTimeIndex,
+                            "FrameTime (ms)", 0.0f, 33.3f, ImVec2(0,80));
+
+        // Display application information
+        ImGui::Separator();
+        ImGui::Text("Astral Engine");
+        // Ensure glad is included if you don't have access to glGetString otherwise
+        const GLubyte* glVersion = glGetString(GL_VERSION);
+        const GLubyte* glRenderer = glGetString(GL_RENDERER);
+        ImGui::Text("OpenGL Version: %s", glVersion ? (const char*)glVersion : "Unknown");
+        ImGui::Text("GPU: %s", glRenderer ? (const char*)glRenderer : "Unknown");
+
+    }
 
     ImGui::End();
 }
 
-void AstralUI::renderCameraControls() {
-    ImGui::Begin("Camera Controls");
 
-    ImGui::SliderFloat3("Camera Position", m_params.cameraPos, -10.0f, 10.0f);
-    ImGui::SliderFloat3("Camera Target", m_params.cameraTarget, -10.0f, 10.0f);
-
-    if (ImGui::Button("Reset Camera")) {
-        m_params.cameraPos[0] = 0.0f; m_params.cameraPos[1] = 0.0f; m_params.cameraPos[2] = 5.0f;
-        m_params.cameraTarget[0] = 0.0f; m_params.cameraTarget[1] = 0.0f; m_params.cameraTarget[2] = 0.0f;
-    }
-
-    // Add a camera orbit toggle
-    static bool orbitCamera = false;
-    static float orbitSpeed = 0.5f;
-    static float orbitRadius = 5.0f;
-    static float orbitHeight = 0.0f;
-
-    ImGui::Separator();
-    ImGui::Checkbox("Orbit Camera", &orbitCamera);
-
-    if (orbitCamera) {
-        ImGui::SliderFloat("Orbit Speed", &orbitSpeed, 0.1f, 2.0f);
-        ImGui::SliderFloat("Orbit Radius", &orbitRadius, 1.0f, 10.0f);
-        ImGui::SliderFloat("Orbit Height", &orbitHeight, -5.0f, 5.0f);
-
-        // Calculate orbit position
-        float time = (float)glfwGetTime();
-        m_params.cameraPos[0] = sin(time * orbitSpeed) * orbitRadius;
-        m_params.cameraPos[1] = orbitHeight;
-        m_params.cameraPos[2] = cos(time * orbitSpeed) * orbitRadius;
-    }
-
-    ImGui::End();
-}
-
-void AstralUI::renderObjectManipulation() {
-    ImGui::Begin("Object Manipulation");
-
-    // Cube scale slider
-    ImGui::Text("Cube Transformation");
-    ImGui::SliderFloat("Scale", &m_params.cubeScale, 0.1f, 3.0f);
-    ImGui::SliderFloat3("Position", m_params.cubePosition, -5.0f, 5.0f);
-
-    ImGui::Separator();
-
-    // Cube color
-    ImGui::Text("Cube Appearance");
-    ImGui::ColorEdit3("Color", m_params.cubeColor);
-
-    // Presets
-    ImGui::Separator();
-    ImGui::Text("Presets");
-    if (ImGui::Button("Default")) {
-        m_params.cubeScale = 1.0f;
-        m_params.cubePosition[0] = 0.0f;
-        m_params.cubePosition[1] = 0.0f;
-        m_params.cubePosition[2] = 0.0f;
-        m_params.cubeColor[0] = 1.0f;
-        m_params.cubeColor[1] = 1.0f;
-        m_params.cubeColor[2] = 1.0f;
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Small Red")) {
-        m_params.cubeScale = 0.5f;
-        m_params.cubeColor[0] = 1.0f;
-        m_params.cubeColor[1] = 0.0f;
-        m_params.cubeColor[2] = 0.0f;
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Large Blue")) {
-        m_params.cubeScale = 2.0f;
-        m_params.cubeColor[0] = 0.0f;
-        m_params.cubeColor[1] = 0.0f;
-        m_params.cubeColor[2] = 1.0f;
-    }
-
-    ImGui::End();
-}
-
-void AstralUI::renderInfoPanel() {
-    ImGui::Begin("Info");
-
-    ImGuiIO& io = ImGui::GetIO();
-
-    // Update frame time history
-    m_frameTimes[m_frameTimeIndex] = 1000.0f / io.Framerate;
-    m_frameTimeIndex = (m_frameTimeIndex + 1) % IM_ARRAYSIZE(m_frameTimes);
-
-    ImGui::Text("FPS: %.1f", io.Framerate);
-    ImGui::Text("Frame Time: %.3f ms", 1000.0f / io.Framerate);
-
-    // Plot frame times
-    ImGui::PlotLines("Frame Times", m_frameTimes, IM_ARRAYSIZE(m_frameTimes), m_frameTimeIndex,
-                    "Frame Time (ms)", 0.0f, 33.3f, ImVec2(0, 80));
-
-    // Display application information
-    ImGui::Separator();
-    ImGui::Text("Astral Engine");
-    ImGui::Text("OpenGL Version: %s", glGetString(GL_VERSION));
-    ImGui::Text("GPU: %s", glGetString(GL_RENDERER));
-
-    ImGui::End();
-}
 
 void AstralUI::render() {
     ImGui::Render();

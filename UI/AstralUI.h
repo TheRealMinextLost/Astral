@@ -15,8 +15,6 @@
 // Structure to hold all the parameters controlled by UI
 struct RenderParams {
     // Rotation controls
-    float rotationSpeed = 0.5f;
-    float rotationAxis[3] = {0.0f, 1.0f, 0.0f};
 
     // Scene settings
     float clearColor[3] = {0.1f, 0.1f, 0.1f};
@@ -26,13 +24,10 @@ struct RenderParams {
     float cameraPos[3] = {0.0f, 0.0f, 5.0f};
     float cameraTarget[3] = {0.0f, 0.0f, 0.0f};
 
-    // Added a simple animation toggle
-    bool animateRotation = true;
-
-    // Cube manipulation
-    float cubeScale = 1.0f;
-    float cubePosition[3] = {0.0f, 0.0f, 0.0f};
-    float cubeColor[3] = {1.0f, 1.0f, 1.0f};
+    // sphere manipulation
+    float sphereRadius = 1.0f;
+    float spherePosition[3] = {0.0f, 0.0f, 0.0f};
+    float sphereColor[3] = {1.0f, 1.0f, 1.0f};
 };
 
 class AstralUI {
@@ -57,10 +52,12 @@ public:
 
 private:
     // ImGui windows - each as a separate method for organization
-    void renderControlPanel();
+
+    void renderMainPanel();
+    /*void renderControlPanel();
     void renderCameraControls();
     void renderObjectManipulation();
-    void renderInfoPanel();
+    void renderInfoPanel();*/
 
     GLFWwindow* m_window;
     RenderParams m_params;

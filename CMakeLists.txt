@@ -68,10 +68,18 @@ find_package(OpenGL REQUIRED)
 set(UI_HEADERS UI/AstralUI.h)]]
 
 
+
+
 # Add the executable
-add_executable(Astral main.cpp
+add_executable(Astral
+        main.cpp
         UI/AstralUI.cpp
-        UI/AstralUI.h)
+        UI/AstralUI.h
+        utilities/utility.cpp
+        utilities/utility.h)
+
+# Optionally specify runtime output directory
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/)
 
 # Add include directories for Astral executable
 target_include_directories(Astral PRIVATE
@@ -79,8 +87,9 @@ target_include_directories(Astral PRIVATE
         ${imgui_SOURCE_DIR}
         ${imgui_SOURCE_DIR}/backends
         ${glm_SOURCE_DIR}
-        ${GLAD_DIR}/include
-)
+        ${GLAD_DIR}/include)
+
+file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/shaders DESTINATION ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 
 # Link libraries
 target_link_libraries(Astral PRIVATE
