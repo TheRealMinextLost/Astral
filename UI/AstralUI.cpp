@@ -1,10 +1,15 @@
 //
-// Created by bysta on 09/04/2025.
+// Handling UI
 //
 
 #include "AstralUI.h"
+#include <glad/glad.h>
+#include <GLFW/glfw3.h>
 #include <algorithm>
 #include <numeric>
+#include <cmath>
+#include <imgui_impl_opengl3.h>
+#include <iostream>
 
 AstralUI::AstralUI(GLFWwindow* window) : m_window(window) {
     init();
@@ -53,7 +58,7 @@ void AstralUI::newFrame() {
     ImGui::PopStyleColor();
 }
 
-void AstralUI::createUI() {
+void AstralUI::createUI(float& fovRef) {
     // Demo window toggle in menu bar
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("Tools")) {
@@ -68,7 +73,7 @@ void AstralUI::createUI() {
         ImGui::ShowDemoWindow(&m_showDemoWindow);
     }
 
-    renderMainPanel();
+    renderMainPanel(fovRef);
 
     /*// Render our custom UI windows
     renderControlPanel();
@@ -77,65 +82,35 @@ void AstralUI::createUI() {
     renderInfoPanel();*/
 }
 
-void AstralUI::renderMainPanel() {
+
+void AstralUI::renderMainPanel(float& fovRef) {
+    // Keep track of the selected debug mode
+
+    int SelectedDebugMode = m_selectedDebugMode;
 
     ImGui::Begin("Astral Settings"); // Start single panel
-
 
     ImGui::Separator(); // Separate sections
 
     // Scene settings
     if (ImGui::CollapsingHeader("Scene Settings", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::ColorEdit3("Clear Color", m_params.clearColor);
-        ImGui::SliderFloat("Field of View", &m_params.fov, 10.0f, 120.0f);
+        ImGui::SliderFloat("Field of View", &fovRef, 10.0f, 120.0f);
     }
 
     ImGui::Separator(); // Separate sections
 
-    // Camera controls
-    if (ImGui::CollapsingHeader("Camera Controls", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::SliderFloat3("Camera Position", m_params.cameraPos, -10.0f, 10.0f);
-        ImGui::SliderFloat3("Camera Target", m_params.cameraTarget, -10.0f, 10.0f);
-
-        if (ImGui::Button("Reset Camera")) {
-            m_params.cameraPos[0] = 0.0f; m_params.cameraPos[1] = 0.0f; m_params.cameraPos[2] = 5.0f;
-            m_params.cameraTarget[0] = 0.0f; m_params.cameraTarget[1] = 0.0f; m_params.cameraTarget[2] = 0.0f;
-        }
-
-        // Camera orbit controls (kept static as they are UI state)
-        static bool orbitCamera = false;
-        static float orbitSpeed = 0.5f;
-        static float orbitRadius = 5.0f;
-        static float orbitHeight = 0.0f;
-
-        ImGui::Separator(); // Separate sections
-        ImGui::Checkbox("Orbit Camera", &orbitCamera);
-
-        if (orbitCamera) {
-            ImGui::SliderFloat("Orbit Speed", &orbitSpeed, 0.1f, 2.0f);
-            ImGui::SliderFloat("Orbit Radius", &orbitRadius, 1.0f, 10.0f);
-            ImGui::SliderFloat("Orbit Height", &orbitHeight, -5.0f, 5.0f);
-
-            // calculate orbit position
-            float time = (float)glfwGetTime();
-            m_params.cameraPos[0] = sin(time * orbitSpeed) * orbitRadius;
-            m_params.cameraPos[1] = orbitHeight;
-            m_params.cameraPos[2] = cos(time * orbitSpeed) * orbitRadius;
-        }
-    }
-
-    ImGui::Separator(); // separate sections
-
+    // SDF Sphere Controls
     if (ImGui::CollapsingHeader("Object Manipulation", ImGuiTreeNodeFlags_DefaultOpen)) {
         // sphere scale slider
-        ImGui::Text("sphere Transformation");
+        ImGui::Text("Sphere Transformation");
         ImGui::SliderFloat("Radius", &m_params.sphereRadius, 0.1f, 3.0f);
         ImGui::SliderFloat3("Position", m_params.spherePosition, -5.0f, 5.0f);
 
         ImGui::Separator();
 
         // sphere color
-        ImGui::Text("sphere Appearance");
+        ImGui::Text("Sphere Appearance");
         ImGui::ColorEdit3("Color", m_params.sphereColor);
 
         // Presets
@@ -146,6 +121,18 @@ void AstralUI::renderMainPanel() {
             m_params.spherePosition[0] = 0.0f; m_params.spherePosition[1] = 0.0f; m_params.spherePosition[2] = 0.0f;
             m_params.sphereColor[0] = 1.0f; m_params.sphereColor[1] = 1.0f; m_params.sphereColor[2] = 1.0f;
         }
+    }
+
+    ImGui::Separator(); // Separate section
+
+    // New Section Raymarch debug
+    if (ImGui::CollapsingHeader("Raymarch Debug", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Text("Visualization Mode");
+        ImGui::RadioButton("Normal",&m_selectedDebugMode, 0); ImGui::SameLine();
+        ImGui::RadioButton("Steps",&m_selectedDebugMode, 1); ImGui::SameLine();
+        ImGui::RadioButton("Hit/Miss", &m_selectedDebugMode, 2);ImGui::SameLine();;
+        ImGui::RadioButton("Normals", &m_selectedDebugMode, 3);
+        //std::cout << "UI Debug Mode:" << m_selectedDebugMode << std::endl;
     }
 
     ImGui::Separator(); // Separate section

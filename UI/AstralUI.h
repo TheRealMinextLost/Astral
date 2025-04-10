@@ -4,12 +4,8 @@
 
 #pragma once
 
-#include "imgui.h"
 #include "imgui_impl_glfw.h"
-#include "imgui_impl_opengl3.h"
-#include <GLFW/glfw3.h>
-#include <glm/glm.hpp>
-#include <string>
+
 
 
 // Structure to hold all the parameters controlled by UI
@@ -18,13 +14,9 @@ struct RenderParams {
 
     // Scene settings
     float clearColor[3] = {0.1f, 0.1f, 0.1f};
-    float fov = 45.0f;
+    // float fov = 45.0f; // Managed in camera class
 
-    // Camera settings
-    float cameraPos[3] = {0.0f, 0.0f, 5.0f};
-    float cameraTarget[3] = {0.0f, 0.0f, 0.0f};
-
-    // sphere manipulation
+    // SDF sphere manipulation
     float sphereRadius = 1.0f;
     float spherePosition[3] = {0.0f, 0.0f, 0.0f};
     float sphereColor[3] = {1.0f, 1.0f, 1.0f};
@@ -37,27 +29,22 @@ public:
 
     // Initialize ImGui context and style
     void init();
-
     // Begin a new ImGui frame
     void newFrame();
-
     // Render all ImGui windows
     void render();
-
     // Create all the UI windows and update the render parameters
-    void createUI();
+    void createUI(float& fovRef);
 
     // Get the current render parameters
     const RenderParams& getParams() const { return m_params; }
 
+    int getDebugMode() const { return m_selectedDebugMode; } // Getter
+
 private:
     // ImGui windows - each as a separate method for organization
 
-    void renderMainPanel();
-    /*void renderControlPanel();
-    void renderCameraControls();
-    void renderObjectManipulation();
-    void renderInfoPanel();*/
+    void renderMainPanel(float& fovRef); // Pass FOV ref
 
     GLFWwindow* m_window;
     RenderParams m_params;
@@ -68,6 +55,8 @@ private:
 
     // UI state
     bool m_showDemoWindow = false;
+
+    int m_selectedDebugMode = 0; // Add a member variable with default
 
 };
 

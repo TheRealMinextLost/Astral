@@ -76,7 +76,9 @@ add_executable(Astral
         UI/AstralUI.cpp
         UI/AstralUI.h
         utilities/utility.cpp
-        utilities/utility.h)
+        utilities/utility.h
+        Basic/Camera.cpp
+        Basic/Camera.h)
 
 # Optionally specify runtime output directory
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/)

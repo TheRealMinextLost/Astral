@@ -7,6 +7,7 @@
 #include <iostream>
 #include "UI/AstralUI.h"
 #include "utilities/utility.h"
+#include "Basic/Camera.h"
 
 // -- Shader file paths --
 const std::string VERTEX_SHADER_PATH = "shaders/raymarch.vert";
@@ -16,10 +17,18 @@ const std::string FRAGMENT_SHADER_PATH = "shaders/raymarch.frag";
 unsigned int SCR_WIDTH = 1920;
 unsigned int SCR_HEIGHT = 1080;
 
+// Global Camera instance
+Camera camera(glm::vec3(0.0f, 0.0f, 5.0f)); //Initial position
+
 int main()
 {
     // Initialize GLFW
     glfwInit();
+
+    // Add window hints
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
     GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "SDF Sphere Raymarcher", NULL, NULL);
     if (window == NULL) {
@@ -38,7 +47,16 @@ int main()
         return -1;
     }
 
-    AstralUI ui(window);
+    // Set user pointer to the camera instance
+    glfwSetWindowUserPointer(window, &camera);
+
+    // Initialize UI
+    AstralUI ui(window); // After GLAD
+
+    // Set GLFW callbacks
+    glfwSetMouseButtonCallback(window, Camera::MouseButtonCallback);
+    glfwSetCursorPosCallback(window, Camera::CursorPosCallback);
+    glfwSetScrollCallback(window, Camera::ScrollCallback);
 
     // Load Shader Sources
     std::string vertexShaderCode = utility::loadShaderSource(VERTEX_SHADER_PATH);
@@ -125,23 +143,30 @@ int main()
     if (u_sphereRadiusLoc == -1) { std::cerr << "Uniform u_sphereRadius not found!" << std::endl; }
     GLint u_sphereColorLoc  = glGetUniformLocation(shaderProgram, "u_sphereColor");
     GLint u_clearColorLoc   = glGetUniformLocation(shaderProgram, "u_clearColor");
+    GLint u_debugModeLoc    = glGetUniformLocation(shaderProgram, "u_debugMode");
+    // Check if locations are valid
+    if (u_debugModeLoc == -1) { std::cerr << "Warning: u_debugMode not found!" << std::endl; }
 
 
     // Render loop
     while (!glfwWindowShouldClose(window))
     {
-
         // Process input, poll events
         glfwPollEvents();
+
+        // Check for Escape Key after pooling events
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
             glfwSetWindowShouldClose(window, true);
 
         // Start the ImGui frame
         ui.newFrame();
-        ui.createUI();
+        ui.createUI(camera.Fov); // UI can modify camera's FOV
 
         // Get params, framebuffer size, viewport
         const RenderParams& params = ui.getParams();
+        int currentDebugMode = ui.getDebugMode();
+
+        // Get framebuffer size, set viewport
         int display_w, display_h;
         glfwGetFramebufferSize(window, &display_w, &display_h);
         glViewport(0, 0, display_w, display_h);
@@ -153,18 +178,18 @@ int main()
         glUniform2f(u_resolutionLoc, (float)display_w, (float)display_h);
         glUniform1f(u_timeLoc, (float)glfwGetTime());
 
-        glm::vec3 camPosVec(params.cameraPos[0], params.cameraPos[1], params.cameraPos[2]);
-        glm::vec3 camTgtVec(params.cameraTarget[0], params.cameraTarget[1], params.cameraTarget[2]);
-        glm::mat3 camBasis = utility::createCameraBasis(camPosVec, camTgtVec);
+        // Get camera data directly from the camera object
+        glUniform3fv(u_cameraPosLoc, 1, glm::value_ptr(camera.Position));
+        glm::mat3 camBasis = camera.GetBasisMatrix(); // use camera's method
+        glUniformMatrix3fv(u_cameraBasisLoc, 1 , GL_FALSE, glm::value_ptr(camBasis));
+        glUniform1f(u_fovLoc, camera.Fov); // uses camera's fov
 
-        glUniform3fv(u_cameraPosLoc,1, glm::value_ptr(camPosVec));
-        glUniformMatrix3fv(u_cameraBasisLoc,1, GL_FALSE, glm::value_ptr(camBasis));
-        glUniform1f(u_fovLoc, params.fov);
-
+        // Get sphere data from UI Parameters
         glUniform3fv(u_spherePosLoc, 1, params.spherePosition);
         glUniform1f(u_sphereRadiusLoc, params.sphereRadius);
         glUniform3fv(u_sphereColorLoc, 1, params.sphereColor);
         glUniform3fv(u_clearColorLoc,1,params.clearColor);
+        glUniform1i(u_debugModeLoc, currentDebugMode);
 
 
         glDisable(GL_DEPTH_TEST); // keep disabled
