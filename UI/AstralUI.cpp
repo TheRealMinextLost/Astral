@@ -58,7 +58,7 @@ void AstralUI::newFrame() {
     ImGui::PopStyleColor();
 }
 
-void AstralUI::createUI(float& fovRef) {
+void AstralUI::createUI(float& fovRef, double gpuTimeMs, size_t ramBytes) {
     // Demo window toggle in menu bar
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("Tools")) {
@@ -73,7 +73,7 @@ void AstralUI::createUI(float& fovRef) {
         ImGui::ShowDemoWindow(&m_showDemoWindow);
     }
 
-    renderMainPanel(fovRef);
+    renderMainPanel(fovRef, gpuTimeMs, ramBytes);
 
     /*// Render our custom UI windows
     renderControlPanel();
@@ -83,7 +83,7 @@ void AstralUI::createUI(float& fovRef) {
 }
 
 
-void AstralUI::renderMainPanel(float& fovRef) {
+void AstralUI::renderMainPanel(float& fovRef,double gpuTimeMs, size_t ramBytes) {
     // Keep track of the selected debug mode
 
     int SelectedDebugMode = m_selectedDebugMode;
@@ -108,10 +108,22 @@ void AstralUI::renderMainPanel(float& fovRef) {
         ImGui::SliderFloat3("Position", m_params.spherePosition, -5.0f, 5.0f);
 
         ImGui::Separator();
-
-        // sphere color
+        // Sphere color
         ImGui::Text("Sphere Appearance");
         ImGui::ColorEdit3("Color", m_params.sphereColor);
+
+
+        // Box Controls
+        ImGui::Text("Box Controls");
+        ImGui::SliderFloat3("Box Center", m_params.boxCenter, -5.0f, 5.0f);
+        ImGui::SliderFloat3("Box HalfSize", m_params.boxHalfSize, -0.1f, 10.0f);
+        ImGui::ColorEdit3("Box Color", m_params.boxColor);
+
+        ImGui::Separator();
+
+        // Blending Controls
+        ImGui::Text("Blending");
+        ImGui::SliderFloat("Smoothness", &m_params.blendSmoothness, 0.001f, 1.0f); // Slider for k
 
         // Presets
         ImGui::Separator();
@@ -128,11 +140,10 @@ void AstralUI::renderMainPanel(float& fovRef) {
     // New Section Raymarch debug
     if (ImGui::CollapsingHeader("Raymarch Debug", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::Text("Visualization Mode");
-        ImGui::RadioButton("Normal",&m_selectedDebugMode, 0); ImGui::SameLine();
+        ImGui::RadioButton("Basic",&m_selectedDebugMode, 0); ImGui::SameLine();
         ImGui::RadioButton("Steps",&m_selectedDebugMode, 1); ImGui::SameLine();
         ImGui::RadioButton("Hit/Miss", &m_selectedDebugMode, 2);ImGui::SameLine();;
         ImGui::RadioButton("Normals", &m_selectedDebugMode, 3);
-        //std::cout << "UI Debug Mode:" << m_selectedDebugMode << std::endl;
     }
 
     ImGui::Separator(); // Separate section
@@ -147,6 +158,9 @@ void AstralUI::renderMainPanel(float& fovRef) {
 
         ImGui::Text("FPS: %.1f", io.Framerate);
         ImGui::Text("Frame Time: %.3f ms", io.Framerate > 0 ? (1000.0f / io.Framerate) : 0.0f);
+        // --- GPU Timing ---
+        ImGui::Text("GPU Raymarch Time: %.3f ms", gpuTimeMs); // Display GPU time
+        ImGui::Separator();
 
         // Plot frame times
         ImGui::PlotLines("Frame Times", m_frameTimes, IM_ARRAYSIZE(m_frameTimes), m_frameTimeIndex,
@@ -160,6 +174,11 @@ void AstralUI::renderMainPanel(float& fovRef) {
         const GLubyte* glRenderer = glGetString(GL_RENDERER);
         ImGui::Text("OpenGL Version: %s", glVersion ? (const char*)glVersion : "Unknown");
         ImGui::Text("GPU: %s", glRenderer ? (const char*)glRenderer : "Unknown");
+
+
+        // --- Memory Usage ---
+        ImGui::Text("RAM Usage (RSS): %.2f MB", (double)ramBytes / (1024.0 * 1024.0)); // Display RAM in MB
+        ImGui::Separator();
 
     }
 

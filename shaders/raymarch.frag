@@ -12,12 +12,19 @@ uniform float u_fov;                // Vertical field of view in degrees
 uniform vec3 u_spherePos;
 uniform float u_sphereRadius;
 uniform vec3 u_sphereColor;
-uniform vec3 u_clearColor;          // Background color
 
+uniform vec3 u_boxCenter;           // Box Center
+uniform vec3 u_boxHalfSize;         // Box Size
+uniform vec3 u_boxColor;            // Box Color
+
+uniform float u_blendSmoothness;    // 'k' for smin
+
+
+uniform vec3 u_clearColor;          // Background color
 uniform int u_debugMode;
 
 // Ray Marching Parameters
-const int MAX_STEPS = 100;
+const int MAX_STEPS = 1100;
 const float MAX_DIST = 100.0;
 const float HIT_THRESHOLD = 0.001;
 
@@ -26,19 +33,61 @@ float sdSphere(vec3 p, vec3 center, float radius) {
     return length(p - center) - radius;
 }
 
-// -- Scene SDF (can combine multiple shapes here later) --
-float mapTheWorld(vec3 p) {
-    // For now, just our single sphere
-    return sdSphere(p, u_spherePos, u_sphereRadius);
+float sdPlane(vec3 p, float height) {
+    // the plane normal is 0,1,0
+    // dot(p, vec3(0,1,0) - height = p.y - height
+    return p.y - height;
 }
 
+
+// p: point to sample
+// center: center position of the box
+// b: half-dimensions (size/2) of the box
+float sdBox(vec3 p, vec3 center,vec3 b){
+    vec3 p_centered = p - center; // Translate point relative to box center
+    vec3 q = abs(p_centered) - b;
+    return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+}
+
+// NEW: Smooth Minimum function
+float smin(float a, float b, float k) {
+    float h = clamp(0.5 + 0.5 * (b-a) / k, 0.0, 1.0);
+    return mix(b,a,h) - k * h * (1.0 - h);
+}
+
+// -- Scene Definition Result
+struct SDFResult {
+    float dist; // signed distance to the combine scene
+    vec3 color; // Color of the closest surface
+    // Add other material properties here if needed
+};
+
+
+// -- Scene SDF (can combine multiple shapes here later) --
+SDFResult mapTheWorld(vec3 p) {
+    // Calculate distance to each object
+    float sphereDist = sdSphere(p, u_spherePos, u_sphereRadius);
+    float boxDist = sdBox(p,u_boxCenter, u_boxHalfSize); // use sdBox
+
+    // Determine which object is closer (for material properties)
+    vec3 color = (sphereDist < boxDist) ? u_sphereColor : u_boxColor;
+
+    // Combine disances smoothly
+    float finalDist = smin(sphereDist, boxDist, u_blendSmoothness);
+
+    return SDFResult(finalDist, color);
+}
+
+// -- Calculate Normal using Gradient of SDF -- (UPDATED)
 // -- Calculate Normal using Gradient of SDF --
+// -- Calculate Normal --
 vec3 calcNormal(vec3 p) {
-    vec2 e = vec2(HIT_THRESHOLD * 0.5, 0.0); // Small offset
+
+    vec2 e = vec2(HIT_THRESHOLD * 0.5, 0.0);
     return normalize(vec3(
-        mapTheWorld(p + e.xxy) - mapTheWorld(p- e.xyy),
-        mapTheWorld(p + e.yxy) - mapTheWorld(p - e.yxy),
-        mapTheWorld(p + e.yyx) - mapTheWorld(p - e.yyx)
+    mapTheWorld(p + e.xyy).dist - mapTheWorld(p - e.xyy).dist, // Corrected previous typo attempt too
+    mapTheWorld(p + e.yxy).dist - mapTheWorld(p - e.yxy).dist,
+    mapTheWorld(p + e.yyx).dist - mapTheWorld(p - e.yyx).dist
     ));
 }
 
@@ -70,6 +119,7 @@ struct RayMarchResult {
     int steps;          // Number of Steps Taken
     bool hit;           // Did the ray hit anything?
     float finalDist;    // Distance at the end
+    vec3 hitColor;      // Color of the object hit (or background)
 };
 
 
@@ -78,28 +128,28 @@ RayMarchResult rayMarch(vec3 ro, vec3 rd){
     float totalDist = 0.0;
     for (int i =0; i < MAX_STEPS; i++){
         vec3 p = ro + rd * totalDist;
-        float distToScene = mapTheWorld(p);
+        SDFResult scene = mapTheWorld(p); // Get distance and color
 
-        if (distToScene < HIT_THRESHOLD){
+        if (scene.dist < HIT_THRESHOLD){
             // Hit! Calculate Lighting
             vec3 normal = calcNormal(p);
-            vec3 finalColor = applyLighting(p, normal, u_sphereColor);
+            vec3 litColor = applyLighting(p, normal, scene.color);
 
             // Fog effect (optional)
-            float fogAmount = 1.0 - exp(-totalDist * 0.05);
-            vec3 MixedColor = mix(finalColor, u_clearColor, fogAmount);
-            return RayMarchResult(MixedColor, i + 1, true, distToScene);
+            //float fogAmount = 1.0 - exp(-totalDist * 0.05);
+            //litcolor = mix(lit);
+            return RayMarchResult(litColor, i + 1, true, totalDist + scene.dist, scene.color);
         }
 
         if (totalDist > MAX_DIST){
             // ray missed everything within max distance
-            return RayMarchResult(u_clearColor, i, false, distToScene);
+            return RayMarchResult(u_clearColor, i, false, totalDist, u_clearColor);
         }
 
         // Advance ray by the disance to nearest object
-        totalDist += distToScene;
+        totalDist += max(HIT_THRESHOLD * 0.1, scene.dist);
     }
-    return RayMarchResult(u_clearColor, MAX_STEPS, false, mapTheWorld(ro + rd * totalDist));
+    return RayMarchResult(u_clearColor, MAX_STEPS, false, totalDist, u_clearColor);
 }
 
 void main()
@@ -123,14 +173,16 @@ void main()
         break;
         case 3: // Show Normals
         if (result.hit){
-            vec3 normal = calcNormal(ro + rd * (length(ro-u_spherePos)-u_sphereRadius)); // Recalc normal approx
+            // Recalculate normal at the approximate hit position
+            vec3 hitPos = ro + rd * result.finalDist;
+            vec3 normal = calcNormal(hitPos);
             finalColor = normal * 0.5 + 0.5; // Map normal range [-1,1] to [0,1] for color
         } else {
             finalColor = vec3(0.0);
         }
         break;
 
-        default: // Case 0
+        default: // Case 0 : normal rendering
         finalColor = result.color;
         break;
     }

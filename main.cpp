@@ -3,7 +3,6 @@
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
 #include <iostream>
 #include "UI/AstralUI.h"
 #include "utilities/utility.h"
@@ -25,6 +24,10 @@ int main()
     // Initialize GLFW
     glfwInit();
 
+    GLuint gpuTimerQuery = 0;
+    GLuint64 gpuFrameTimeNano = 0; // Store results in nanoseconds
+    bool gpuTimerQueryInFlight = false;
+
     // Add window hints
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -38,6 +41,7 @@ int main()
     }
 
     glfwMakeContextCurrent(window);
+    glfwSwapInterval(0); // 0 = Disable Vsync
 
     // ** Initialize GLAD **
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
@@ -46,6 +50,8 @@ int main()
         glfwTerminate(); // Exit if GLAD fails
         return -1;
     }
+
+    glGenQueries(1,&gpuTimerQuery);
 
     // Set user pointer to the camera instance
     glfwSetWindowUserPointer(window, &camera);
@@ -134,33 +140,53 @@ int main()
     // Get uniform locations
     GLint u_resolutionLoc   = glGetUniformLocation(shaderProgram, "u_resolution");
     GLint u_timeLoc         = glGetUniformLocation(shaderProgram, "u_time");
-    // other
     GLint u_cameraPosLoc    = glGetUniformLocation(shaderProgram, "u_cameraPos");
     GLint u_cameraBasisLoc  = glGetUniformLocation(shaderProgram, "u_cameraBasis");
     GLint u_fovLoc          = glGetUniformLocation(shaderProgram, "u_fov");
     GLint u_spherePosLoc    = glGetUniformLocation(shaderProgram, "u_spherePos");
     GLint u_sphereRadiusLoc = glGetUniformLocation(shaderProgram, "u_sphereRadius");
-    if (u_sphereRadiusLoc == -1) { std::cerr << "Uniform u_sphereRadius not found!" << std::endl; }
     GLint u_sphereColorLoc  = glGetUniformLocation(shaderProgram, "u_sphereColor");
     GLint u_clearColorLoc   = glGetUniformLocation(shaderProgram, "u_clearColor");
     GLint u_debugModeLoc    = glGetUniformLocation(shaderProgram, "u_debugMode");
-    // Check if locations are valid
-    if (u_debugModeLoc == -1) { std::cerr << "Warning: u_debugMode not found!" << std::endl; }
+    GLint u_boxCenterLoc    = glGetUniformLocation(shaderProgram, "u_boxCenter");
+    GLint u_boxHalfSizeLoc  = glGetUniformLocation(shaderProgram, "u_boxHalfSize");
+    GLint u_boxColorLoc     = glGetUniformLocation(shaderProgram, "u_boxColor");
+    GLint u_blendSmoothnessLoc = glGetUniformLocation(shaderProgram, "u_blendSmoothness");
 
+    // Check if locations are valid
+    if (u_sphereRadiusLoc == -1) { std::cerr << "Uniform u_sphereRadius not found!" << std::endl; }
+    if (u_debugModeLoc == -1) { std::cerr << "Warning: u_debugMode not found!" << std::endl; }
+    if (u_boxCenterLoc == -1) { std::cerr << "Warning: Uniform u_boxCenter not found!" << std::endl; }
+    if (u_boxHalfSizeLoc == -1) { std::cerr << "Warning: Uniform u_boxHalfSize not found!" << std::endl; }
+    if (u_boxColorLoc == -1) { std::cerr << "Warning: Uniform u_boxColor not found!" << std::endl; }
+    if (u_blendSmoothnessLoc == -1) { std::cerr << "Warning: Uniform u_blendSmoothness not found!" << std::endl; }
+
+
+    static size_t currentRSS = 0;
+    static int frameCounter = 0; // Update RAM less frequently
+    const int ramUpdateInterval = 30; // Update every 30 frames
 
     // Render loop
     while (!glfwWindowShouldClose(window))
     {
+        if (!gpuTimerQueryInFlight) {
+            glBeginQuery(GL_TIME_ELAPSED, gpuTimerQuery);
+            gpuTimerQueryInFlight = true;
+        }
+
         // Process input, poll events
         glfwPollEvents();
 
+        if (frameCounter++ % ramUpdateInterval == 0) {
+            currentRSS= utility::getCurrentRSS();
+        }
         // Check for Escape Key after pooling events
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
             glfwSetWindowShouldClose(window, true);
 
         // Start the ImGui frame
         ui.newFrame();
-        ui.createUI(camera.Fov); // UI can modify camera's FOV
+        ui.createUI(camera.Fov, (double)gpuFrameTimeNano / 1e6, currentRSS); // UI can modify camera's FOV
 
         // Get params, framebuffer size, viewport
         const RenderParams& params = ui.getParams();
@@ -188,6 +214,15 @@ int main()
         glUniform3fv(u_spherePosLoc, 1, params.spherePosition);
         glUniform1f(u_sphereRadiusLoc, params.sphereRadius);
         glUniform3fv(u_sphereColorLoc, 1, params.sphereColor);
+
+        // Box and blend uniforms
+        glUniform3fv(u_boxCenterLoc, 1, params.boxCenter);
+        glUniform3fv(u_boxHalfSizeLoc, 1, params.boxHalfSize);
+        glUniform3fv(u_boxColorLoc, 1, params.boxColor);
+
+
+        // Other Uniforms
+        glUniform1f(u_blendSmoothnessLoc, params.blendSmoothness);
         glUniform3fv(u_clearColorLoc,1,params.clearColor);
         glUniform1i(u_debugModeLoc, currentDebugMode);
 
@@ -198,6 +233,20 @@ int main()
         glBindVertexArray(quadVAO);
         glDrawArrays(GL_TRIANGLES, 0, 6);
         glBindVertexArray(0);
+
+        // End GPU Timer
+        if (gpuTimerQueryInFlight) {
+            glEndQuery(GL_TIME_ELAPSED);
+        }
+
+        GLint available = 0;
+        if (gpuTimerQueryInFlight) {
+            glGetQueryObjectiv(gpuTimerQuery, GL_QUERY_RESULT_AVAILABLE, &available);
+            if (available) {
+                glGetQueryObjectui64v(gpuTimerQuery, GL_QUERY_RESULT, &gpuFrameTimeNano);
+                gpuTimerQueryInFlight = false;
+            }
+        }
 
         // Render ImGui
         ui.render();
@@ -211,6 +260,7 @@ int main()
     glDeleteVertexArrays(1, &quadVAO);
     glDeleteBuffers(1, &quadVBO);
     glDeleteProgram(shaderProgram);
+    glDeleteQueries(1,&gpuTimerQuery);
 
     glfwTerminate();
     return 0;

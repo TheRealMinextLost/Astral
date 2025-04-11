@@ -5,9 +5,9 @@
 46	1917	7659244742741652	_deps/glfw-build/src/CMakeFiles/glfw.dir/null_window.c.obj	928ceb781bffc066
 41	1792	7659244742696481	_deps/glfw-build/src/CMakeFiles/glfw.dir/null_monitor.c.obj	37fdec902f9a2fff
 54	1783	7659244742823184	_deps/glfw-build/src/CMakeFiles/glfw.dir/win32_module.c.obj	5ae82beeb289e5f8
-676	2036	7660073230760360	Astral.exe	43182dfaaf7d2bb4
+1803	3303	7660210876008296	Astral.exe	43182dfaaf7d2bb4
 9	1713	7659244742378566	_deps/glfw-build/src/CMakeFiles/glfw.dir/init.c.obj	dbd2df90ee6bfe35
-6	531	7660071860366323	CMakeFiles/Astral.dir/UI/AstralUI.cpp.obj	d9649c5dcc0cb725
+32	1802	7660210858295442	CMakeFiles/Astral.dir/UI/AstralUI.cpp.obj	d9649c5dcc0cb725
 21	1753	7659244742505033	_deps/glfw-build/src/CMakeFiles/glfw.dir/vulkan.c.obj	9a9287084ba2b73f
 29	1788	7659244742581235	_deps/glfw-build/src/CMakeFiles/glfw.dir/egl_context.c.obj	7f3a6d9e5ba73814
 19	2827	7659244896210771	_deps/glm-build/glm/libglm.a	a9d581f05eac019f
@@ -20,7 +20,7 @@
 1802	8873	7659244760308276	CMakeFiles/imgui.dir/_deps/imgui-src/imgui.cpp.obj	bb728ba7e5e139dc
 3179	5783	7659244774080265	CMakeFiles/glad.dir/external/glad/src/glad.c.obj	6a2f9dbd76526c7a
 26	1966	7659244742545587	_deps/glfw-build/src/CMakeFiles/glfw.dir/window.c.obj	cad841d5acc5cc0c
-7	676	7660073224069616	CMakeFiles/Astral.dir/main.cpp.obj	1aab342383a059a
+6	729	7660200525535136	CMakeFiles/Astral.dir/main.cpp.obj	1aab342383a059a
 1677	3179	7659244759058093	_deps/glfw-build/src/CMakeFiles/glfw.dir/win32_time.c.obj	d778b688c6cbf8ad
 1713	3316	7659244759418995	_deps/glfw-build/src/CMakeFiles/glfw.dir/win32_thread.c.obj	1672d2b6bf08a1ed
 1784	3336	7659244760120681	_deps/glfw-build/src/CMakeFiles/glfw.dir/win32_joystick.c.obj	9901cfa4467f5948
@@ -37,5 +37,11 @@
 3926	5922	7659244781540146	_deps/glfw-build/src/libglfw3.a	5f869fae056a3153
 1917	7064	7659244761460610	CMakeFiles/imgui.dir/_deps/imgui-src/imgui_widgets.cpp.obj	b398744c6fa9a669
 8	282	7659244896091974	libimgui.a	33d821a299f848c8
-3	416	7660076855489957	build.ninja	8b43d1b553bfe4ca
-26	661	7659922321772143	CMakeFiles/Astral.dir/utilities/utility.cpp.obj	cf9e4c9822ec5851
+3	416	7660210977885301	build.ninja	8b43d1b553bfe4ca
+11	1544	7660200525595500	CMakeFiles/Astral.dir/utilities/utility.cpp.obj	cf9e4c9822ec5851
+9	562	7660211331827521	CMakeFiles/Astral.dir/UI/AstralUI.cpp.obj	d9649c5dcc0cb725
+6	1731	7660211331804048	CMakeFiles/Astral.dir/main.cpp.obj	1aab342383a059a
+1731	3025	7660211349047753	Astral.exe	43182dfaaf7d2bb4
+10	594	7660212627207389	CMakeFiles/Astral.dir/UI/AstralUI.cpp.obj	d9649c5dcc0cb725
+7	735	7660212627177458	CMakeFiles/Astral.dir/main.cpp.obj	1aab342383a059a
+735	2043	7660212634461973	Astral.exe	43182dfaaf7d2bb4
