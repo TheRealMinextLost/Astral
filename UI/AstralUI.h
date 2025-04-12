@@ -69,6 +69,8 @@ private:
     bool m_showDemoWindow = false;
     float m_frameTimes[120] = {};
     int m_frameTimeIndex = 0;
+    bool m_showSettingsWindow = true;
+    bool m_dockspace_layout_initialized = false;
 };
 
 

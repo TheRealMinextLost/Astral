@@ -90,7 +90,7 @@ void setupPickingFBO(int width, int height) {
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, pickingTexture, 0);
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) { cerr << "ERROR::FRAMEBUFFER:: Picking FBO is not complete" << endl; }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glCheckError(); // Check after setup
+     // Check after setup
 }
 
 // --- Shader Compile ---
@@ -111,10 +111,10 @@ GLuint compileShader(GLenum type, const std::string& source) {
 
 // --- Link Program ---
 GLuint linkProgram(GLuint vertexShader, GLuint fragmentShader) {
-    GLuint program = glCreateProgram(); glCheckError();
-    glAttachShader(program, vertexShader); glCheckError();
-    glAttachShader(program, fragmentShader); glCheckError();
-    glLinkProgram(program); glCheckError(); // Check right after link
+    GLuint program = glCreateProgram();
+    glAttachShader(program, vertexShader);
+    glAttachShader(program, fragmentShader);
+    glLinkProgram(program);  // Check right after link
 
     GLint success; GLchar infoLog[1024];
     glGetProgramiv(program, GL_LINK_STATUS, &success);
@@ -125,8 +125,8 @@ GLuint linkProgram(GLuint vertexShader, GLuint fragmentShader) {
     } else if (strlen(infoLog) > 0) { cout << "Program (ID: " << program << ") Link Log (Success with messages):\n" << infoLog << endl; }
 
     // Detach shaders immediately after successful link
-    glDetachShader(program, vertexShader); glCheckError();
-    glDetachShader(program, fragmentShader); glCheckError();
+    glDetachShader(program, vertexShader);
+    glDetachShader(program, fragmentShader);
 
     return program;
 }
@@ -145,39 +145,39 @@ void handlePickingRequest(int windowWidth, int windowHeight) {
     if (!pickingFBO || !pickingShaderProgram) { cerr << "Picking system not initialized!" << std::endl; return; }
 
     // Bind Picking FBO & Set Viewport
-    glBindFramebuffer(GL_FRAMEBUFFER, pickingFBO); glCheckError();
-    glViewport(0, 0, windowWidth, windowHeight); glCheckError();
+    glBindFramebuffer(GL_FRAMEBUFFER, pickingFBO);
+    glViewport(0, 0, windowWidth, windowHeight);
 
     // Clear Texture
-    GLint clearValue = -1; glClearBufferiv(GL_COLOR, 0, &clearValue); glCheckError();
+    GLint clearValue = -1; glClearBufferiv(GL_COLOR, 0, &clearValue);
 
     // Use Picking Shader & Set Non-UBO Uniforms
-    glUseProgram(pickingShaderProgram); glCheckError();
+    glUseProgram(pickingShaderProgram);
     if (pickingUniformLocs.count("u_resolution")) glUniform2f(pickingUniformLocs["u_resolution"], (float)windowWidth, (float)windowHeight);
     if (pickingUniformLocs.count("u_cameraPos")) glUniform3fv(pickingUniformLocs["u_cameraPos"], 1, value_ptr(camera.Position));
     if (pickingUniformLocs.count("u_cameraBasis")) glUniformMatrix3fv(pickingUniformLocs["u_cameraBasis"], 1, GL_FALSE, value_ptr(camera.GetBasisMatrix()));
     if (pickingUniformLocs.count("u_fov")) glUniform1f(pickingUniformLocs["u_fov"], camera.Fov);
     int numObjectsToSendPick = std::min((int)sdfObjects.size(), MAX_SDF_OBJECTS);
     if (pickingUniformLocs.count("u_sdfCount")) glUniform1i(pickingUniformLocs["u_sdfCount"], numObjectsToSendPick);
-    glCheckError(); // Check after setting picking uniforms
+     // Check after setting picking uniforms
 
     // Draw Fullscreen Quad
-    glDisable(GL_DEPTH_TEST); glCheckError();
-    glBindVertexArray(quadVAO); glCheckError();
-    glDrawArrays(GL_TRIANGLES, 0, 6); glCheckError();
-    glBindVertexArray(0); glCheckError();
+    glDisable(GL_DEPTH_TEST);
+    glBindVertexArray(quadVAO);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glBindVertexArray(0);
 
     // Read Pixel Data
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1); glCheckError();
-    glReadBuffer(GL_COLOR_ATTACHMENT0); glCheckError();
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
     int pickedIndex = -1;
     int readY = windowHeight - 1 - pickMouseY;
     if (pickMouseX >= 0 && pickMouseX < windowWidth && readY >= 0 && readY < windowHeight) {
-        glReadPixels(pickMouseX, readY, 1, 1, GL_RED_INTEGER, GL_INT, &pickedIndex); glCheckError();
+        glReadPixels(pickMouseX, readY, 1, 1, GL_RED_INTEGER, GL_INT, &pickedIndex);
     } else { cerr << "Picking coordinates out of bounds!" << std::endl; }
 
     // Unbind FBO
-    glBindFramebuffer(GL_FRAMEBUFFER, 0); glCheckError();
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
     // Process result
     if (pickedIndex >= 0 && pickedIndex < sdfObjects.size()) {
@@ -200,57 +200,52 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
 // --- UBO ---
 void updateSDFUBOData() {
     int numObjectsToSend = std::min((int)sdfObjects.size(), MAX_SDF_OBJECTS);
-    // No need to update if empty, but bufferSubData with size 0 is harmless
-    // if (numObjectsToSend <= 0) return;
-
-    // Map only the part of the buffer we need (potentially more efficient)
-    glBindBuffer(GL_UNIFORM_BUFFER, sdfDataUBO); glCheckError();
-    GLintptr offset = 0;
-    GLsizeiptr length = numObjectsToSend * sizeof(SDFObjectGPUData);
-
-    // If sending data, prepare it
-    if (numObjectsToSend > 0) {
-         std::vector<SDFObjectGPUData> gpuData(numObjectsToSend); // Create temporary buffer
-         for(int i = 0; i < numObjectsToSend; ++i) {
-             const auto& obj = sdfObjects[i];
-             gpuData[i].inverseModelMatrix = obj.getInverseModelMatrix();
-             gpuData[i].color = glm::vec4(obj.color, 1.0f);
-             if (obj.type == SDFType::SPHERE) {
-                 gpuData[i].params1_3_type = glm::vec4(obj.radius, 0.0f, 0.0f, static_cast<float>(obj.type));
-             } else if (obj.type == SDFType::BOX) {
-                 gpuData[i].params1_3_type = glm::vec4(obj.halfSize.x, obj.halfSize.y, obj.halfSize.z, static_cast<float>(obj.type));
-             } else {
-                 gpuData[i].params1_3_type = glm::vec4(0.0f, 0.0f, 0.0f, static_cast<float>(obj.type));
-             }
-         }
-         // Update the buffer data
-         glBufferSubData(GL_UNIFORM_BUFFER, offset, length, gpuData.data()); glCheckError();
+    if (numObjectsToSend <= 0) {
+        // Optionally clear the UBO if needed, or just return
+        // You might still need to bind and upload zero data if the shader expects something
+        // For now, just return if empty.
+        return;
     }
-    // Even if sending 0 objects, make sure bufferSubData isn't called with invalid size
-    // else { // Optionally clear the buffer if needed, though often not necessary
-    //      glClearBufferSubData(...)
-    // }
 
-    glBindBuffer(GL_UNIFORM_BUFFER, 0); glCheckError();
+    std::vector<SDFObjectGPUData> gpuData(numObjectsToSend);
+    for(int i = 0; i < numObjectsToSend; ++i) {
+        const auto& obj = sdfObjects[i];
+
+        gpuData[i].inverseModelMatrix = obj.getInverseModelMatrix();
+        gpuData[i].color = glm::vec4(obj.color, 1.0f);
+
+        if (obj.type == SDFType::SPHERE) {
+            gpuData[i].params1_3_type = glm::vec4(obj.radius, 0.0f, 0.0f, static_cast<float>(obj.type));
+        } else if (obj.type == SDFType::BOX) {
+            gpuData[i].params1_3_type = glm::vec4(obj.halfSize.x, obj.halfSize.y, obj.halfSize.z, static_cast<float>(obj.type));
+        } else {
+            gpuData[i].params1_3_type = glm::vec4(0.0f, 0.0f, 0.0f, static_cast<float>(obj.type));
+        }
+    }
+
+    glBindBuffer(GL_UNIFORM_BUFFER, sdfDataUBO);
+    // Update the buffer - ensure size matches gpuData size correctly
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, gpuData.size() * sizeof(SDFObjectGPUData), gpuData.data());
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
 }
 
 void setupUBO() {
     cout << "Setting up UBO..." << endl;
-    glGenBuffers(1, &sdfDataUBO);                           glCheckError();
-    glBindBuffer(GL_UNIFORM_BUFFER, sdfDataUBO);            glCheckError();
-    glBufferData(GL_UNIFORM_BUFFER, MAX_SDF_OBJECTS * sizeof(SDFObjectGPUData), nullptr, GL_DYNAMIC_DRAW); glCheckError();
-    glBindBuffer(GL_UNIFORM_BUFFER, 0);                     glCheckError();
+    glGenBuffers(1, &sdfDataUBO);
+    glBindBuffer(GL_UNIFORM_BUFFER, sdfDataUBO);
+    glBufferData(GL_UNIFORM_BUFFER, MAX_SDF_OBJECTS * sizeof(SDFObjectGPUData), nullptr, GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
-    glBindBufferBase(GL_UNIFORM_BUFFER, UBO_BINDING_POINT, sdfDataUBO);  glCheckError();
+    glBindBufferBase(GL_UNIFORM_BUFFER, UBO_BINDING_POINT, sdfDataUBO);
 
     // Link Shader Blocks (Assume shaderProgram and pickingShaderProgram are valid)
     // Main Shader
     cout << "Checking & Binding UBO for Main Shader (Program ID: " << shaderProgram << ")" << endl;
     if (shaderProgram != 0) {
-        GLuint blockIndexMain = glGetUniformBlockIndex(shaderProgram, "SDFBlock"); glCheckError();
+        GLuint blockIndexMain = glGetUniformBlockIndex(shaderProgram, "SDFBlock");
         cout << "  Main Shader - glGetUniformBlockIndex for 'SDFBlock' returned: " << blockIndexMain << endl;
         if (blockIndexMain != GL_INVALID_INDEX) {
-            glUniformBlockBinding(shaderProgram, blockIndexMain, UBO_BINDING_POINT); glCheckError();
+            glUniformBlockBinding(shaderProgram, blockIndexMain, UBO_BINDING_POINT);
             cout << "  Main Shader - Bound 'SDFBlock' to binding point " << UBO_BINDING_POINT << "." << endl;
         } else { cerr << "!!!!!! Warning: Uniform block 'SDFBlock' NOT FOUND in main shader program. !!!!!!" << endl; }
     } else { cerr << "Error: Main shader program handle is invalid before UBO setup." << endl; }
@@ -258,10 +253,10 @@ void setupUBO() {
     // Picking Shader
     cout << "Checking & Binding UBO for Picking Shader (Program ID: " << pickingShaderProgram << ")" << endl;
     if (pickingShaderProgram != 0) {
-        GLuint blockIndexPicking = glGetUniformBlockIndex(pickingShaderProgram, "SDFBlock"); glCheckError();
+        GLuint blockIndexPicking = glGetUniformBlockIndex(pickingShaderProgram, "SDFBlock");
         cout << "  Picking Shader - glGetUniformBlockIndex for 'SDFBlock' returned: " << blockIndexPicking << endl;
         if (blockIndexPicking != GL_INVALID_INDEX) {
-            glUniformBlockBinding(pickingShaderProgram, blockIndexPicking, UBO_BINDING_POINT); glCheckError();
+            glUniformBlockBinding(pickingShaderProgram, blockIndexPicking, UBO_BINDING_POINT);
             cout << "  Picking Shader - Bound 'SDFBlock' to binding point " << UBO_BINDING_POINT << "." << endl;
         } else { cerr << "!!!!!! Warning: Uniform block 'SDFBlock' NOT FOUND in picking shader program. !!!!!!" << endl; }
     } else { cerr << "Error: Picking shader program handle is invalid before UBO setup." << endl; }
@@ -293,12 +288,12 @@ int main() {
         if (!pointers_ok) { cerr << "Critical GLAD pointers missing!" << endl; glfwTerminate(); return -1; }
         else { cout << "Required GLAD function pointers seem to be loaded." << endl; }
     }
-    glCheckError(); // Initial check
+     // Initial check
 
     // --- OpenGL Setup & Timer ---
     glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glGenQueries(1, &gpuTimerQuery);
-    glCheckError();
+    glGenQueries(2, &gpuTimerQuery);
+
 
     // --- Init UI & Callbacks ---
     AstralUI ui(window);
@@ -306,7 +301,7 @@ int main() {
     glfwSetMouseButtonCallback(window, Camera::MouseButtonCallback);
     glfwSetCursorPosCallback(window, Camera::CursorPosCallback);
     glfwSetScrollCallback(window, Camera::ScrollCallback);
-    glCheckError();
+
 
     // --- Load ALL Shader Sources ---
     cout << "Loading shaders..." << endl;
@@ -315,7 +310,7 @@ int main() {
     string pickingFragmentCode = utility::loadShaderSource(PICKING_SHADER_PATH);
     if (vertexShaderCode.empty() || fragmentShaderCode.empty() || pickingFragmentCode.empty()) { cerr << "Failed to load shaders!" << endl; return -1; }
     cout << "Shaders loaded." << endl;
-    glCheckError();
+
 
     // --- Compile ALL Shaders ---
     cout << "Compiling shaders..." << endl;
@@ -324,28 +319,28 @@ int main() {
     GLuint pickingFragmentShader = compileShader(GL_FRAGMENT_SHADER, pickingFragmentCode);
     if (!vertexShader || !mainFragmentShader || !pickingFragmentShader) { cerr << "Shader compilation failed." << endl; return -1; }
     cout << "Shaders compiled." << endl;
-    glCheckError();
+
 
     // --- Link MAIN Program ---
     cout << "Linking main program..." << endl;
     shaderProgram = linkProgram(vertexShader, mainFragmentShader);
     if (shaderProgram == 0) { cerr << "Main program linking failed." << endl; /* Delete shaders? */ return -1; }
     cout << "Main program linked (ID: " << shaderProgram << ")." << endl;
-    glCheckError();
+
 
     // --- Link PICKING Program ---
     cout << "Linking picking program..." << endl;
     pickingShaderProgram = linkProgram(vertexShader, pickingFragmentShader);
     if (pickingShaderProgram == 0) { cerr << "Picking program linking failed." << endl; /* Delete shaders? */ return -1; }
     cout << "Picking program linked (ID: " << pickingShaderProgram << ")." << endl;
-    glCheckError();
+
 
     // --- Delete individual shaders (no longer needed) ---
     cout << "Deleting individual shaders..." << endl;
     glDeleteShader(vertexShader);
     glDeleteShader(mainFragmentShader);
     glDeleteShader(pickingFragmentShader);
-    glCheckError();
+
 
     // --- Get NON-UBO Uniform Locations ---
     cout << "Getting non-UBO uniform locations..." << endl;
@@ -363,7 +358,7 @@ int main() {
     u_sdfCountLoc = glGetUniformLocation(shaderProgram, "u_sdfCount");
     u_selectedObjectIDLoc = glGetUniformLocation(shaderProgram, "u_selectedObjectID");
     glUseProgram(0);
-    glCheckError();
+
 
     // Picking Program
     glUseProgram(pickingShaderProgram);
@@ -374,12 +369,12 @@ int main() {
     pickingUniformLocs["u_fov"] = glGetUniformLocation(pickingShaderProgram, "u_fov");
     pickingUniformLocs["u_sdfCount"] = glGetUniformLocation(pickingShaderProgram, "u_sdfCount");
     glUseProgram(0);
-    glCheckError();
+
     cout << "Finished getting non-UBO uniform locations." << endl;
 
     // --- Setup UBO (AFTER linking and getting other uniforms) ---
     setupUBO(); // Contains the block index query and binding
-    glCheckError(); // Check state AFTER UBO setup
+     // Check state AFTER UBO setup
 
     // --- Setup Quad & FBO ---
     cout << "Setting up Quad and FBO..." << endl;
@@ -389,17 +384,17 @@ int main() {
     glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), &quadVertices, GL_STATIC_DRAW);
     glEnableVertexAttribArray(0); glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
     glBindVertexArray(0);
-    glCheckError();
+
     int initialWidth, initialHeight; glfwGetFramebufferSize(window, &initialWidth, &initialHeight);
     setupPickingFBO(initialWidth, initialHeight);
-    glCheckError();
+
     cout << "Quad and FBO setup complete." << endl;
 
     // --- Initialize SDF Objects ---
     cout << "Initializing SDF Objects..." << endl;
     SDFObject sphere1(nextSdfId++); sphere1.type = SDFType::SPHERE; sphere1.position = vec3(-1.5f, 0.0f, 0.0f); sphere1.radius = 0.8f; sphere1.color = vec3(1.0f, 1.0f, 1.0f); sdfObjects.push_back(sphere1);
     SDFObject box1(nextSdfId++); box1.type = SDFType::BOX; box1.position = vec3(1.5f, 0.0f, 0.0f); box1.halfSize = vec3(0.6f, 0.7f, 0.8f); box1.color = vec3(1.0f, 1.0f, 1.0f); sdfObjects.push_back(box1);
-    glCheckError();
+
 
     // --- Gizmo State ---
     ImGuizmo::OPERATION currentGizmoOperation = ImGuizmo::TRANSLATE;
@@ -426,7 +421,7 @@ int main() {
             if (timerResultAvailable) {
                 // Result is ready, get it.
                 glGetQueryObjectui64v(gpuTimerQuery, GL_QUERY_RESULT, &gpuFrameTimeNano);
-                glCheckError();
+
                 // Now gpuFrameTimeNano holds the latest *available* measurement
             }
             // Else: Result not ready yet, gpuFrameTimeNano keeps its old value.
@@ -436,7 +431,6 @@ int main() {
         if (gpuTimerQuery != 0) {
             glBeginQuery(GL_TIME_ELAPSED, gpuTimerQuery);
         }
-        glCheckError();
         // --- Timing & Basic Events ---
         double currentTime = glfwGetTime();
         deltaTime = currentTime - lastTime;
@@ -445,11 +439,12 @@ int main() {
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, true);
 
         // --- Update UBO ---
-        updateSDFUBOData(); glCheckError();
+        updateSDFUBOData();
 
         // --- Begin ImGui/ImGuizmo Frame ---
         ui.newFrame();
         ImGuizmo::BeginFrame();
+
         int display_w, display_h;
         glfwGetFramebufferSize(window, &display_w, &display_h);
 
@@ -472,46 +467,93 @@ int main() {
         }
 
         // --- Perform GPU Picking (if requested by previous frame's input) ---
-        handlePickingRequest(display_w, display_h); glCheckError();
+        handlePickingRequest(display_w, display_h);
 
         // --- Setup for Main Render Pass Viewport & Aspect Ratio ---
-        glViewport(0, 0, display_w, display_h); glCheckError();
+        glViewport(0, 0, display_w, display_h);
         float aspectRatio = (display_w > 0 && display_h > 0) ? static_cast<float>(display_w) / static_cast<float>(display_h) : 1.0f;
 
         // --- ImGuizmo Setup & Manipulation ---
         ImGuizmo::SetOrthographic(false);
-        ImGuizmo::SetDrawlist();
-        ImGuizmo::SetRect(0,0, (float)display_w, (float)display_h);
-        mat4 viewMatrix = camera.GetViewMatrix();
-        mat4 projectionMatrix = camera.GetProjectionMatrix(aspectRatio);
+        ImGuizmo::SetDrawlist(ImGui::GetBackgroundDrawList(ImGui::GetMainViewport())); // Draw to viewport background
+        ImGuizmo::SetRect(0, 0, (float)display_w, (float)display_h);
+
         if (useGizmo && selectedObjectId != -1) {
+            mat4 viewMatrix = camera.GetViewMatrix();
+            mat4 projectionMatrix = camera.GetProjectionMatrix(aspectRatio);
+
             SDFObject* selectedObjPtr = nullptr;
             for (auto& obj : sdfObjects) { if (obj.id == selectedObjectId) { selectedObjPtr = &obj; break; } }
+
             if (selectedObjPtr) {
                 mat4 modelMatrix = selectedObjPtr->getModelMatrix();
+                vec3 oldPos = selectedObjPtr->position;
+                vec3 oldRot = selectedObjPtr->rotation;
+                vec3 oldScale = selectedObjPtr->scale;
+
+                // --- Always Call Manipulate for Drawing, Add Logging ---
+                ImGuiIO& io = ImGui::GetIO(); // Get IO state
+
+                // Log state *before* the call
+                std::cout << "Frame Pre-Manipulate: ID=" << selectedObjectId
+                          << " WantCapture=" << io.WantCaptureMouse
+                          << " MouseDown=" << io.MouseDown[0]
+                          // ----- ADD THIS ----- VVVV
+                          << " IsDragging=" << ImGui::IsMouseDragging(0)
+                          // -------------------- ^^^^
+                          << " GizmoIsUsing(Pre)=" << ImGuizmo::IsUsing()
+                          << " GizmoIsOver=" << ImGuizmo::IsOver() << std::endl;
+
+                // ***** CRITICAL: Call Manipulate unconditionally if selected *****
+                // This ensures the gizmo is DRAWN.
                 ImGuizmo::Manipulate(value_ptr(viewMatrix), value_ptr(projectionMatrix),
                                      currentGizmoOperation, currentGizmoMode, value_ptr(modelMatrix));
-                if (ImGuizmo::IsUsing()) {
+
+                // Check state *after* the call
+                bool usingAfterManipulate = ImGuizmo::IsUsing();
+                std::cout << "Frame Post-Manipulate: GizmoIsUsing(Post)=" << usingAfterManipulate << std::endl;
+
+                // Now, decide whether to *apply* the manipulation result based ONLY on IsUsing()
+                if (usingAfterManipulate) {
+                    // If ImGuizmo reports it's being used, proceed with decomposition and update checks
+                    std::cout << "Frame Processing Update (GizmoIsUsing is true)" << std::endl;
+
                     vec3 newPos, newRot, newScale;
                     ImGuizmo::DecomposeMatrixToComponents(value_ptr(modelMatrix), value_ptr(newPos), value_ptr(newRot), value_ptr(newScale));
-                    if (currentGizmoOperation == ImGuizmo::SCALE) { newScale = max(newScale, vec3(0.001f)); }
-                    selectedObjPtr->position = newPos;
-                    selectedObjPtr->rotation = newRot;
-                    selectedObjPtr->scale = newScale;
-                    // std::cout << "Gizmo Updated ID " << selectedObjPtr->id << "..." << std::endl; // Optional debug
+
+                    // Check if the matrix actually changed
+                    if (!all(epsilonEqual(oldPos, newPos, 1e-5f)) ||
+                        !all(epsilonEqual(oldRot, newRot, 1e-3f)) ||
+                        !all(epsilonEqual(oldScale, newScale, 1e-5f)))
+                    {
+                        if (currentGizmoOperation == ImGuizmo::SCALE) { newScale = max(newScale, vec3(0.001f)); }
+                        selectedObjPtr->position = newPos;
+                        selectedObjPtr->rotation = newRot;
+                        selectedObjPtr->scale = newScale;
+                        std::cout << "  >>> Gizmo Applied Update to ID " << selectedObjPtr->id << std::endl;
+                    } else {
+                         std::cout << "  Gizmo IsUsing, but matrix unchanged." << std::endl;
+                    }
                 }
-            } else { selectedObjectId = -1; useGizmo = false; } // Deselect if object somehow not found
-        }
+                // --- End Update Application Block ---
+
+            } else {
+                // Object not found, deselect (safety check)
+                std::cout << "Warning: useGizmo=true but selectedObjPtr is null for ID=" << selectedObjectId << std::endl;
+                selectedObjectId = -1;
+                useGizmo = false;
+            }
+        } // End if (useGizmo && selectedObjectId != -1)
 
         // --- Create ImGui UI Windows/Controls ---
         const RenderParams& params = ui.getParams(); // Get params for main render pass uniforms
         // Pass the last valid gpuFrameTimeNano reading
         ui.createUI(camera.Fov, (double)gpuFrameTimeNano / 1e6, currentRSS,
                       sdfObjects, selectedObjectId, nextSdfId, useGizmo);
-        glCheckError(); // Check after UI logic
+         // Check after UI logic
 
         // --- Render Main SDF Scene ---
-        glUseProgram(shaderProgram); glCheckError();
+        glUseProgram(shaderProgram);
         // Set uniforms that are NOT part of the UBO
         glUniform2f(u_resolutionLoc, (float)display_w, (float)display_h);
         glUniform3fv(u_cameraPosLoc, 1, value_ptr(camera.Position));
@@ -524,17 +566,17 @@ int main() {
         glUniform1i(u_sdfCountLoc, numObjectsToSend);
         int selectedObjectIndex = findObjectIndex(sdfObjects, selectedObjectId);
         glUniform1i(u_selectedObjectIDLoc, selectedObjectIndex); // Send selected INDEX
-        glCheckError(); // Check after setting main uniforms
+         // Check after setting main uniforms
 
         // Draw the fullscreen quad
         glDisable(GL_DEPTH_TEST);
-        glBindVertexArray(quadVAO); glCheckError();
-        glDrawArrays(GL_TRIANGLES, 0, 6); glCheckError();
-        glBindVertexArray(0); glCheckError();
+        glBindVertexArray(quadVAO);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glBindVertexArray(0);
 
         // --- Render ImGui Draw Data ---
         // IMPORTANT: This should be inside the query if you want to measure UI render time
-        ui.render(); glCheckError();
+        ui.render();
 
         // --- 3. End CURRENT Frame's Timer Query ---
         if (gpuTimerQuery != 0) {
@@ -545,7 +587,7 @@ int main() {
         // --- Swap Buffers ---
         glfwMakeContextCurrent(window); // Ensure main context is current
         glfwSwapBuffers(window);
-        glCheckError(); // Final check for the frame
+         // Final check for the frame
 
     }
 }

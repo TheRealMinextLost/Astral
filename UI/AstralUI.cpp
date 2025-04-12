@@ -9,6 +9,7 @@
 #include <cmath>
 #include <imgui_impl_opengl3.h>
 #include <iostream>
+#include <imgui_internal.h>
 
 using namespace ImGui;
 using namespace glm;
@@ -60,30 +61,94 @@ void AstralUI::newFrame() {
     ImGui_ImplGlfw_NewFrame();
     NewFrame();
 
-    // Create dockspace
+    // --- Setup Dockspace Host Window ---
+    ImGuiWindowFlags window_flags = ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking;
+    ImGuiViewport* viewport = GetMainViewport();
+    SetNextWindowPos(viewport->WorkPos);
+    SetNextWindowSize(viewport->WorkSize);
+    SetNextWindowViewport(viewport->ID);
+    PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
+    window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
+    window_flags |= ImGuiWindowFlags_NoBackground; // for passthrough
+
+
     PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-    DockSpaceOverViewport(0, GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
-    PopStyleVar();
+    Begin("DockSpace Host", nullptr, window_flags); // Begin host window
+    PopStyleVar(); // Pop WindowPadding
+
+    PopStyleVar(2); // Pop WindowRounding, WindowBorderSize
+
+    // --- Dockspace Logic ---
+    ImGuiIO& io = GetIO();
+    if (io.ConfigFlags & ImGuiConfigFlags_DockingEnable) {
+        ImGuiID dockspace_id = GetID("MyDockSpace"); // Master ID
+
+        // Submit the DockSpace node first (important!)
+        // We use PassthruCentralNode so the *central* area (after splitting) interacts with the 3D view.
+        DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
+
+        // Build the layout programmatically ONLY on the first frame
+        if (!m_dockspace_layout_initialized) {
+            m_dockspace_layout_initialized = true;
+
+            // Start fresh
+            DockBuilderRemoveNode(dockspace_id);
+            // Add the node back with dockspace flag
+            DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+            // Set it to fill the host window size
+            DockBuilderSetNodeSize(dockspace_id, viewport->WorkSize);
+
+            // Split the master dockspace: dock_id_right gets 20% width, dock_id_main gets the rest
+            ImGuiID dock_id_main; // Will store the ID of the central node
+            ImGuiID dock_id_right; // Will store the ID of the right node
+            float right_panel_width_ratio = 0.20f; // Adjust as needed (20%)
+            DockBuilderSplitNode(dockspace_id, ImGuiDir_Right, right_panel_width_ratio, &dock_id_right, &dock_id_main);
+
+            // Important: Configure the nodes (optional but good for fixed panels)
+            ImGuiDockNode* right_node = DockBuilderGetNode(dock_id_right);
+            if (right_node) {
+                right_node->LocalFlags |= ImGuiDockNodeFlags_NoTabBar; // Hide tab bar if only one window
+                // right_node->LocalFlags |= ImGuiDockNodeFlags_NoDockingSplitMe; // Prevent splitting this node further
+                // right_node->LocalFlags |= ImGuiDockNodeFlags_NoDockingOverMe; // Prevent docking other windows *into* this node
+            }
+             ImGuiDockNode* main_node = DockBuilderGetNode(dock_id_main);
+            if (main_node) {
+                 // Ensure the main node keeps the passthrough capability
+                 main_node->LocalFlags |= ImGuiDockNodeFlags_PassthruCentralNode;
+                 main_node->LocalFlags |= ImGuiDockNodeFlags_NoTabBar; // Usually don't want a tab bar for the main 3D view area
+            }
+
+
+            // Dock the "Astral Settings" window into the right node
+            DockBuilderDockWindow("Astral Settings", dock_id_right);
+            // You could dock other default windows into dock_id_main if needed
+
+            // Commit the layout
+            DockBuilderFinish(dockspace_id);
+            std::cout << "Dockspace layout built." << std::endl;
+        }
+    } else {
+        Text("Docking is not enabled!");
+    }
+
+    End(); // End the host window ("DockSpace Host")
+    // --- End Dockspace Setup ---
 }
+
 
 void AstralUI::createUI(float& fovRef, double gpuTimeMs, size_t ramBytes,
                       vector<SDFObject>& objects, int& currentSelectedId,
                       int& nextSdfId, bool& useGizmoRef)
 {
-    /*// Demo window toggle in menu bar
-    if (BeginMainMenuBar()) {
-        if (BeginMenu("Tools")) {
-            MenuItem("ImGui Demo Window", NULL, &m_showDemoWindow);
-            EndMenu();
-        }
-        EndMainMenuBar();
-    }*/
+    ImGuiWindowFlags settings_window_flags = ImGuiWindowFlags_NoCollapse;
 
-    Begin("Astral Settings");
-
-    // Call the panel rendering function
-    renderMainPanel(fovRef, gpuTimeMs, ramBytes,objects,currentSelectedId, nextSdfId, useGizmoRef);
-
+    if (Begin("Astral Settings", &m_showSettingsWindow)) {
+        // Call the panel rendering function ONLY if Begin() didn't return false (e.g., window is not collapsed)
+        renderMainPanel(fovRef, gpuTimeMs, ramBytes, objects, currentSelectedId, nextSdfId, useGizmoRef);
+    }
+    // Always call End() to match Begin()
     End();
 }
 

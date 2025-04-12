@@ -37,73 +37,70 @@ glm::mat4 Camera::GetProjectionMatrix(float aspectRatio, float nearPlane, float 
     return perspective(radians(Fov), aspectRatio, nearPlane, farPlane);
 }
 
+// Inside Camera.cpp
 void Camera::GetBasisVectors(vec3 &outRight, vec3 &outUp, vec3 &outForward) const {
-    outForward = normalize(Target - Position);
+    // Forward vector points FROM position TOWARDS target
+    outForward = Target - Position;
+    float forwardLenSq = dot(outForward, outForward);
+    if (forwardLenSq < 1e-10f) { // Position and Target are too close
+        // Fallback: Assume looking down -Z from current position
+        outForward = vec3(0.0f, 0.0f, -1.0f);
+        outRight = vec3(1.0f, 0.0f, 0.0f);
+        outUp = vec3(0.0f, 1.0f, 0.0f);
+        // std::cerr << "Warning: Camera Position and Target are nearly identical!" << std::endl;
+        return;
+    }
+    outForward = normalize(outForward); // Normalize valid forward vector
 
-    // Recalculate Right vector robustly
-    vec3 tempWorldUp = WorldUp;
-    // Handle case where looking straight up or down
-    if (abs(dot(outForward, tempWorldUp)) > 0.999f) {
-        // Use Z-axis if looking straight up/down
-        tempWorldUp = vec3(0.0f,0.0f,(outForward.y > 0) ? -1.0f : 1.0f);
+    // Calculate Right vector using cross product with a reliable Up direction
+    vec3 referenceUp = WorldUp; // Start with world up
+    if (abs(dot(outForward, referenceUp)) > 0.9999f) { // If Forward is aligned with WorldUp
+        // Use world X axis as reference up instead
+        referenceUp = vec3(1.0f, 0.0f, 0.0f);
+        // If Forward is ALSO aligned with world X (extremely unlikely unless looking along Y at origin)
+        if (abs(dot(outForward, referenceUp)) > 0.9999f) {
+            referenceUp = vec3(0.0f, 0.0f, 1.0f); // Use world Z axis
+        }
     }
 
-    outRight = normalize(cross(outForward, tempWorldUp));
-    // Recalculate Up vector
+    outRight = normalize(cross(outForward, referenceUp));
+    // Check if cross product resulted in zero vector (shouldn't with the referenceUp logic)
+    if(length(outRight) < 1e-6f) {
+        std::cerr << "Error: Failed to calculate Right vector!" << std::endl;
+        // Provide a default orthogonal basis
+        outRight = vec3(1.0f, 0.0f, 0.0f);
+        outUp = vec3(0.0f, 1.0f, 0.0f);
+        return;
+    }
+
+    // Recalculate the true Up vector
     outUp = normalize(cross(outRight, outForward));
 }
 
 mat3 Camera::GetBasisMatrix() const {
-    vec3 right, up, forward;
-    GetBasisVectors(right, up, forward);
-    // GLSL mat3 constructor takes columns. We need rows for basis vectors.
-    // Remember camera looks down -Z, so use -forward
-    return mat3(right, up, -forward);
+    vec3 right, up, forward; GetBasisVectors(right, up, forward); return mat3(right, up, -forward);
 }
 
+// Refined Orbit Logic
 void Camera::ProcessOrbit(double xoffset, double yoffset) {
-    vec3 direction = Position - Target;
-    float distance = length(direction);
-    if (distance < 1e-4f) return;
+    vec3 directionToCamera = Position - Target; float distance = length(directionToCamera);
 
-    vec3 normalized_direction = normalize(direction);
+    if (distance < 1e-5f) return; vec3 normDirToCamera = normalize(directionToCamera);
 
-    vec3 camRight, camUp, camForward;
-    GetBasisVectors(camRight, camUp, camForward); // Use the derived 'up' for vertical orbit
-
-    // Horizontal rotation
+    vec3 camRight, camUp, camForward; GetBasisVectors(camRight, camUp, camForward);
     float yawAngle = -static_cast<float>(xoffset) * OrbitSensitivity;
     float pitchAngle = -static_cast<float>(yoffset) * OrbitSensitivity;
+    float currentPitch = asin(clamp(dot(normDirToCamera, normalize(WorldUp)), -1.0f, 1.0f));
+    float maxPitch = radians(89.9f);
 
+    if (currentPitch + pitchAngle > maxPitch) { pitchAngle = maxPitch - currentPitch; }
+    else if (currentPitch + pitchAngle < -maxPitch) { pitchAngle = -maxPitch - currentPitch; }
+    mat4 yawRotation = rotate(mat4(1.0f), yawAngle, WorldUp);
 
-    mat4 yawRotation = rotate(mat4(1.0f), yawAngle, camUp);
     mat4 pitchRotation = rotate(mat4(1.0f), pitchAngle, camRight);
-
-
-    // Combine rotations
-    vec3 rotatedNormalizedDir = normalize(vec3(pitchRotation * yawRotation * vec4(normalized_direction, 0.0f)));
-
-    // Prevent flipping over the top/bottom
-    vec3 potentialNewForward = -rotatedNormalizedDir;
-    vec3 potentialNewRight = normalize(cross(potentialNewForward, WorldUp));
-    vec3 potentialNewUp = normalize(cross(potentialNewRight, potentialNewForward));
-    float dotWorldUp = dot(potentialNewUp, normalize(WorldUp));
-
-    vec3 finalNormalizedDirection;
-
-    if (abs(dotWorldUp) < 0.998f) {
-        finalNormalizedDirection = rotatedNormalizedDir;
-    } else {
-        finalNormalizedDirection = normalize(vec3(yawRotation * vec4(normalized_direction, 0.0f)));
-    }
-
-
-    if (length(finalNormalizedDirection) > 1e-5f) {
-        Position = Target + finalNormalizedDirection * distance;
-    } else {
-        std::cerr << "Orbit Warning: Final direction normalized failed! Resetting position." << std::endl;
-        Position = Target + normalized_direction * distance;
-    }
+    vec3 finalNormDir = normalize(vec3(yawRotation * pitchRotation * vec4(normDirToCamera, 0.0f)));
+    if (isnan(finalNormDir.x) || isinf(finalNormDir.x)) { std::cerr << "Orbit Warning: NaN/Inf detected!" << std::endl; return; }
+    Position = Target + finalNormDir * distance;
 }
 
 void Camera::ProcessPan(double xoffset, double yoffset) {
@@ -158,47 +155,64 @@ void Camera::ProcessKeyboardMovement(GLFWwindow *window, float deltaTime) {
     }
 }
 
+// --- Simplified MouseButtonCallback ---
+// --- Simplified MouseButtonCallback ---
 void Camera::MouseButtonCallback(GLFWwindow *window, int button, int action, int mods) {
+    // Let ImGui process the event first
     ImGui_ImplGlfw_MouseButtonCallback(window, button, action, mods);
     ImGuiIO& io = ImGui::GetIO();
-    if (io.WantCaptureMouse) { return; }
 
+    // If ImGui handled the click (e.g., on a UI window), do nothing further.
+    if (io.WantCaptureMouse) {
+        // Reset camera drag states just in case they were set before ImGui captured
+        Camera* camera = static_cast<Camera*>(glfwGetWindowUserPointer(window));
+        if (camera) {
+            camera->LeftMouseDown = false;
+            camera->RightMouseDown = false;
+            camera->IsPanning = false;
+            camera->IsOrbiting = false;
+        }
+        return; // Exit early, ImGui has priority
+    }
+
+    // --- If ImGui did NOT capture the mouse ---
     Camera* camera = static_cast<Camera*>(glfwGetWindowUserPointer(window));
     if (!camera) return;
 
-    // --- Reset firstMouse on ANY button press ---
+    // Reset firstMouse flag for camera movement delta calculation on any press
     if (action == GLFW_PRESS) {
         camera->firstMouse = true;
     }
 
+    // Handle Left Mouse Button for Picking
     if (button == GLFW_MOUSE_BUTTON_LEFT) {
         if (action == GLFW_PRESS) {
             camera->LeftMouseDown = true;
-            if (useGizmo && ImGuizmo::IsOver()) { /* Gizmo handles click */ }
-            else {
-                // --- Picking logic will go here (GPU version later) ---
-                // Placeholder: Deselect for now
-                // selectedObjectId = -1;
-                // useGizmo = false;
-                // std::cout << "Clicked, but picking not implemented yet." << std::endl;
-
-                 // --- Initiate GPU Picking ---
-                 double xpos, ypos;
-                 glfwGetCursorPos(window, &xpos, &ypos);
-                 requestPicking((int)xpos, (int)ypos); // We'll define this global function/flag
-            }
+            // ALWAYS request picking if ImGui didn't capture the mouse.
+            // Selection state (useGizmo=true) will be set by handlePickingRequest.
+            double xpos, ypos;
+            glfwGetCursorPos(window, &xpos, &ypos);
+            requestPicking((int)xpos, (int)ypos);
+            std::cout << "Left Mouse Press: Picking requested (ImGui did not capture mouse)" << std::endl;
         } else if (action == GLFW_RELEASE) {
             camera->LeftMouseDown = false;
+            std::cout << "Left Mouse Release" << std::endl;
         }
-    } else if (button == GLFW_MOUSE_BUTTON_RIGHT) {
+    }
+    // Handle Right Mouse Button for Camera (Example: Orbit/Pan start)
+    else if (button == GLFW_MOUSE_BUTTON_RIGHT) {
         if (action == GLFW_PRESS) {
             camera->RightMouseDown = true;
             glfwGetCursorPos(window, &camera->LastMouseX, &camera->LastMouseY);
+            // Potentially set camera->IsOrbiting or IsPanning here if using right-drag
         } else if (action == GLFW_RELEASE) {
             camera->RightMouseDown = false;
+            // Potentially reset camera->IsOrbiting or IsPanning here
         }
-    } else if (button == GLFW_MOUSE_BUTTON_MIDDLE) {
-        if (action == GLFW_PRESS) {
+    }
+    // Handle Middle Mouse Button for Camera (Orbit/Pan)
+    else if (button == GLFW_MOUSE_BUTTON_MIDDLE) {
+         if (action == GLFW_PRESS) {
             glfwGetCursorPos(window, &camera->LastMouseX, &camera->LastMouseY);
             if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS) {
                 camera->IsPanning = true; camera->IsOrbiting = false;
@@ -212,61 +226,37 @@ void Camera::MouseButtonCallback(GLFWwindow *window, int button, int action, int
 }
 
 void Camera::CursorPosCallback(GLFWwindow *window, double xpos, double ypos) {
-    ImGui_ImplGlfw_CursorPosCallback(window, xpos, ypos);
-    Camera* camera = static_cast<Camera*>(glfwGetWindowUserPointer(window));
-    if (!camera) return;
+    ImGui_ImplGlfw_CursorPosCallback(window, xpos, ypos); // ImGui FIRST
+    Camera* camera = static_cast<Camera*>(glfwGetWindowUserPointer(window)); if (!camera) return;
     ImGuiIO& io = ImGui::GetIO();
 
-    // Check if Gizmo is active *and* being used or hovered
+    // Check AFTER ImGui processed AND check Gizmo state
+    // *** THIS CONDITION IS ESSENTIAL ***
     bool gizmoConsumingMouse = useGizmo && (ImGuizmo::IsUsing() || ImGuizmo::IsOver());
-
     if (io.WantCaptureMouse || gizmoConsumingMouse) {
-        camera->firstMouse = true; // Reset on interrupt
-        return;
+        camera->firstMouse = true; // Reset delta calculation on interrupt
+        return; // <<<--- MUST return here to prevent camera movement stealing input
     }
+    // *** END ESSENTIAL CHECK ***
 
-    if (camera->firstMouse) {
-        camera->LastMouseX = xpos;
-        camera->LastMouseY = ypos;
-        camera->firstMouse = false;
-    }
+    // --- Camera movement logic (Orbit/Pan) ---
+    // Only runs if ImGui AND the gizmo did NOT capture the mouse
+    if (camera->firstMouse) { camera->LastMouseX = xpos; camera->LastMouseY = ypos; camera->firstMouse = false; }
+    double xoffset = xpos - camera->LastMouseX; double yoffset = ypos - camera->LastMouseY;
+    camera->LastMouseX = xpos; camera->LastMouseY = ypos;
 
-    double xoffset = xpos - camera->LastMouseX;
-    double yoffset = ypos - camera->LastMouseY;
-    camera->LastMouseX = xpos;
-    camera->LastMouseY = ypos;
-
-    // Process movement based on WHICH mouse button is down
-    if (camera->IsOrbiting) { // Middle mouse drag (no shift)
-        camera->ProcessOrbit(xoffset, yoffset);
-    } else if (camera->IsPanning) { // Middle mouse drag (with shift)
-        camera->ProcessPan(xoffset, yoffset);
-    }
-    // Add right-mouse drag orbit/pan if desired
-    // else if (camera->RightMouseDown) { camera->ProcessOrbit(xoffset, yoffset); }
-
+    // Process camera movement ONLY if the corresponding mouse buttons/states are active
+    // (e.g., middle mouse for orbit/pan)
+    if (camera->IsOrbiting) { camera->ProcessOrbit(xoffset, yoffset); }
+    else if (camera->IsPanning) { camera->ProcessPan(xoffset, yoffset); }
+    // else if (camera->RightMouseDown) { /* Optional right-drag camera */ }
 }
 
+// No changes needed for ScrollCallback
 void Camera::ScrollCallback(GLFWwindow *window, double xoffset, double yoffset) {
-    ImGui_ImplGlfw_ScrollCallback(window, xoffset, yoffset);
-
-    // Check if ImGui wants mouse capture first!
+    ImGui_ImplGlfw_ScrollCallback(window, xoffset, yoffset); // ImGui FIRST
     ImGuiIO& io = ImGui::GetIO();
-    if (io.WantCaptureMouse) { // Don't process zoom if ImGui use the scroll
-        return;
-    }
-
-    Camera* camera = static_cast<Camera*>(glfwGetWindowUserPointer(window));
-    if (!camera) return;
-    // Process zoom based on vertical scroll (yoffset)
+    if (io.WantCaptureMouse) { return; } // Check AFTER ImGui processed
+    Camera* camera = static_cast<Camera*>(glfwGetWindowUserPointer(window)); if (!camera) return;
     camera->ProcessZoom(yoffset);
 }
-
-
-
-
-
-
-
-
-
