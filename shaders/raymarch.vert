@@ -1,4 +1,4 @@
-#version 330 core
+#version 460 core
 layout (location = 0) in vec2 aPos; // Input: 2D vertex position
 
 

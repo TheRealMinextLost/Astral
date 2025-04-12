@@ -2,6 +2,6 @@
 -- Including Win32 support
 -- GLM: Version 1.0.1
 -- GLM: Build with C++ features auto detection
--- Configuring done (0.8s)
+-- Configuring done (0.3s)
 -- Generating done (0.1s)
 -- Build files have been written to: D:/Projects/Astral/cmake-build-debug

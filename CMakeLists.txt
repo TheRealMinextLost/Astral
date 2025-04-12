@@ -78,7 +78,11 @@ add_executable(Astral
         utilities/utility.cpp
         utilities/utility.h
         Basic/Camera.cpp
-        Basic/Camera.h)
+        Basic/Camera.h
+        Basic/SDFObject.h
+        ImGizmo/ImGuizmo.h
+        ImGizmo/ImGuizmo.cpp
+)
 
 # Optionally specify runtime output directory
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/)

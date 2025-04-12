@@ -1,55 +1,42 @@
-#version 330 core
+#version 460 core
+
+
 out vec4 FragColor;
 in vec2 fragCoordScreen; // Input: Screen coords from vertex shader (-1 to 1)
 
 // Uniforms from CPU
 uniform vec2 u_resolution;          // Viewport resolution (width, height)
-uniform float u_time;               // Time (optional, for animations)
 uniform vec3 u_cameraPos;           //
 uniform mat3 u_cameraBasis;         // Stores camera's Right, Up, Forward vectors
 uniform float u_fov;                // Vertical field of view in degrees
 
-uniform vec3 u_spherePos;
-uniform float u_sphereRadius;
-uniform vec3 u_sphereColor;
+uniform int u_sdfCount;                         // Actual number of objects sent
+uniform int u_selectedObjectID;     // ID of the selected object (-1 for none)
 
-uniform vec3 u_boxCenter;           // Box Center
-uniform vec3 u_boxHalfSize;         // Box Size
-uniform vec3 u_boxColor;            // Box Color
+uniform float u_blendSmoothness;    // 'k' for smin (Global Blend)
 
-uniform float u_blendSmoothness;    // 'k' for smin
-
+const int MAX_SDF_OBJECTS = 10;
 
 uniform vec3 u_clearColor;          // Background color
 uniform int u_debugMode;
 
 // Ray Marching Parameters
-const int MAX_STEPS = 1100;
+const int MAX_STEPS = 200;
 const float MAX_DIST = 100.0;
 const float HIT_THRESHOLD = 0.001;
 
 // --- SDF Function (Sphere) ---
-float sdSphere(vec3 p, vec3 center, float radius) {
-    return length(p - center) - radius;
+float sdSphereLocal(vec3 p, float radius) {
+    return length(p) - radius;
 }
 
-float sdPlane(vec3 p, float height) {
-    // the plane normal is 0,1,0
-    // dot(p, vec3(0,1,0) - height = p.y - height
-    return p.y - height;
-}
-
-
-// p: point to sample
-// center: center position of the box
-// b: half-dimensions (size/2) of the box
-float sdBox(vec3 p, vec3 center,vec3 b){
-    vec3 p_centered = p - center; // Translate point relative to box center
-    vec3 q = abs(p_centered) - b;
+float sdBoxLocal(vec3 p, vec3 b) {
+    // Assumes p is already in local space, centered at origin
+    vec3 q = abs(p) -b ;
     return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
 }
 
-// NEW: Smooth Minimum function
+// Smooth Minimum function
 float smin(float a, float b, float k) {
     float h = clamp(0.5 + 0.5 * (b-a) / k, 0.0, 1.0);
     return mix(b,a,h) - k * h * (1.0 - h);
@@ -59,33 +46,76 @@ float smin(float a, float b, float k) {
 struct SDFResult {
     float dist; // signed distance to the combine scene
     vec3 color; // Color of the closest surface
-    // Add other material properties here if needed
+    int objectId; // ID of the object corresponding to 'dist'
+    bool isSelected; // Was the closest object the selected one?
 };
 
+// --- FIX: UBO Struct Definition ---
+struct SDFObjectGPUData {
+    mat4 inverseModelMatrix;
+    vec4 color;
+    vec4 params1_3_type;
+};
 
-// -- Scene SDF (can combine multiple shapes here later) --
+// --- MODIFIED UBO DEFINITION ---
+layout (std140, binding = 0) uniform SDFBlock {
+    SDFObjectGPUData objects[MAX_SDF_OBJECTS];
+} sdfBlockInstance;
+
+
 SDFResult mapTheWorld(vec3 p) {
-    // Calculate distance to each object
-    float sphereDist = sdSphere(p, u_spherePos, u_sphereRadius);
-    float boxDist = sdBox(p,u_boxCenter, u_boxHalfSize); // use sdBox
+    float finalDist = MAX_DIST;
+    vec3 finalColor = u_clearColor;
+    int closestObjectId = -1;
 
-    // Determine which object is closer (for material properties)
-    vec3 color = (sphereDist < boxDist) ? u_sphereColor : u_boxColor;
+    for (int i = 0; i < u_sdfCount; ++i) {
+        // --- MODIFY ACCESS TO USE THE INSTANCE NAME ---
+        mat4 invTransform = sdfBlockInstance.objects[i].inverseModelMatrix;
+        vec3 objColor = sdfBlockInstance.objects[i].color.rgb;
+        float param1 = sdfBlockInstance.objects[i].params1_3_type.x;
+        float param2 = sdfBlockInstance.objects[i].params1_3_type.y;
+        float param3 = sdfBlockInstance.objects[i].params1_3_type.z;
+        int objType = int(sdfBlockInstance.objects[i].params1_3_type.w);
+        // --- END MODIFICATION ---
 
-    // Combine disances smoothly
-    float finalDist = smin(sphereDist, boxDist, u_blendSmoothness);
+        // ... rest of the function using objColor, param1, etc. ...
+        vec4 pLocal4 = invTransform * vec4(p, 1.0);
+        vec3 pLocal = pLocal4.xyz / pLocal4.w;
 
-    return SDFResult(finalDist, color);
+        float currentObjDist = MAX_DIST;
+        vec3 invScaleApprox = vec3(length(invTransform[0].xyz), length(invTransform[1].xyz), length(invTransform[2].xyz));
+        float avgInvScale = length(invScaleApprox) / sqrt(3.0) + 1e-6;
+        float approxFwdScale = (avgInvScale > 1e-5) ? (1.0 / avgInvScale) : 1.0;
+
+        float localDist = MAX_DIST;
+        if (objType == 0) { // Sphere
+            localDist = sdSphereLocal(pLocal, param1);
+        } else if (objType == 1) { // Box
+            localDist = sdBoxLocal(pLocal, vec3(param1, param2, param3));
+        }
+        currentObjDist = localDist * approxFwdScale;
+
+        if (i == 0) {
+            finalDist = currentObjDist;
+            finalColor = objColor;
+            closestObjectId = i;
+        } else {
+            if (currentObjDist < finalDist) {
+                finalColor = objColor;
+                closestObjectId = i;
+            }
+            finalDist = smin(finalDist, currentObjDist, u_blendSmoothness);
+        }
+    }
+    bool isSelected = (closestObjectId != -1 && closestObjectId == u_selectedObjectID);
+    return SDFResult(finalDist, finalColor, closestObjectId, isSelected);
 }
 
-// -- Calculate Normal using Gradient of SDF -- (UPDATED)
-// -- Calculate Normal using Gradient of SDF --
 // -- Calculate Normal --
 vec3 calcNormal(vec3 p) {
-
     vec2 e = vec2(HIT_THRESHOLD * 0.5, 0.0);
     return normalize(vec3(
-    mapTheWorld(p + e.xyy).dist - mapTheWorld(p - e.xyy).dist, // Corrected previous typo attempt too
+    mapTheWorld(p + e.xyy).dist - mapTheWorld(p - e.xyy).dist,
     mapTheWorld(p + e.yxy).dist - mapTheWorld(p - e.yxy).dist,
     mapTheWorld(p + e.yyx).dist - mapTheWorld(p - e.yyx).dist
     ));
@@ -104,13 +134,20 @@ vec3 getRayDir(vec2 screenPos, float fov){
     return normalize(u_cameraBasis * viewDir);
 }
 
-// -- Simple Lambertian Diffuse lighting --
-vec3 applyLighting(vec3 hitPos, vec3 normal, vec3 baseColor){
-    vec3 lightDir = normalize(vec3(0.8,1.0,-0.5)); // Hardcoded light direction
+// -- Simple Lambertian Diffuse lighting + Selection Highlight --
+vec3 applyLighting(vec3 hitPos, vec3 normal, vec3 baseColor, bool isSelected) {
+    vec3 lightDir = normalize(vec3(0.8, 1.0, -0.5));
     float diffuse = max(0.0, dot(normal, lightDir));
-    vec3 ambient = vec3(0.1) * baseColor; // Small ambient term
+    vec3 ambient = vec3(0.1) * baseColor;
 
-    return ambient + baseColor * diffuse;
+    vec3 finalColor = ambient + baseColor * diffuse;
+
+    // Add selection highlight
+    if (isSelected) {
+        finalColor += vec3(0.4, 0.4, 0.0); // Slightly stronger yellow highlight
+    }
+
+    return clamp(finalColor, 0.0, 1.0);
 }
 
 
@@ -118,8 +155,9 @@ struct RayMarchResult {
     vec3 color;         // Final Color
     int steps;          // Number of Steps Taken
     bool hit;           // Did the ray hit anything?
-    float finalDist;    // Distance at the end
-    vec3 hitColor;      // Color of the object hit (or background)
+    float finalDist;    // Distance from origin along ray to the hit point
+    int hitObjectID;    // ID of the object hit
+    bool hitSelected;   // Was the hit object selected?
 };
 
 
@@ -133,23 +171,24 @@ RayMarchResult rayMarch(vec3 ro, vec3 rd){
         if (scene.dist < HIT_THRESHOLD){
             // Hit! Calculate Lighting
             vec3 normal = calcNormal(p);
-            vec3 litColor = applyLighting(p, normal, scene.color);
+
+            vec3 litColor = applyLighting(p, normal, scene.color, scene.isSelected);
 
             // Fog effect (optional)
             //float fogAmount = 1.0 - exp(-totalDist * 0.05);
             //litcolor = mix(lit);
-            return RayMarchResult(litColor, i + 1, true, totalDist + scene.dist, scene.color);
+            return RayMarchResult(litColor, i + 1, true, totalDist, scene.objectId, scene.isSelected);
         }
 
         if (totalDist > MAX_DIST){
-            // ray missed everything within max distance
-            return RayMarchResult(u_clearColor, i, false, totalDist, u_clearColor);
+            break;
         }
 
         // Advance ray by the disance to nearest object
         totalDist += max(HIT_THRESHOLD * 0.1, scene.dist);
     }
-    return RayMarchResult(u_clearColor, MAX_STEPS, false, totalDist, u_clearColor);
+    // Missed
+    return RayMarchResult(u_clearColor, MAX_STEPS, false, totalDist, -1, false);
 }
 
 void main()
@@ -179,6 +218,20 @@ void main()
             finalColor = normal * 0.5 + 0.5; // Map normal range [-1,1] to [0,1] for color
         } else {
             finalColor = vec3(0.0);
+        }
+        break;
+        case 4:
+        if(result.hit){
+            // Simple ha function to get varie colors from ID
+            float hue = fract(float(result.hitObjectID) * 0.61803398875);
+            // imple HSV to RGB approximation
+            vec3 hsv = vec3(hue, 0.8, 0.8);
+            vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 1.0);
+            vec3 p = abs(fract(hsv.xxx + K.xyz) * 6.0 - K.www);
+            finalColor = hsv.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), hsv.y);
+
+        } else {
+            finalColor = u_clearColor;
         }
         break;
 

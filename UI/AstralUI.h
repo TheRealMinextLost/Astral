@@ -3,9 +3,11 @@
 //
 
 #pragma once
-
+#include <vector>
 #include "imgui_impl_glfw.h"
+#include "Basic/SDFObject.h"
 
+struct GLFWindow;
 
 
 // Structure to hold all the parameters controlled by UI
@@ -35,37 +37,38 @@ public:
     AstralUI(GLFWwindow* window);
     ~AstralUI();
 
-    // Initialize ImGui context and style
-    void init();
     // Begin a new ImGui frame
     void newFrame();
     // Render all ImGui windows
     void render();
     // Create all the UI windows and update the render parameters
-    void createUI(float& fovRef, double gpuTimeMs, size_t ramBytes);
+    void createUI(float& fovRef, double gpuTimeMs, size_t ramBytes,
+                    std::vector<SDFObject>& objects, int& currentSelectedId,
+                    int& nextSdfId, bool& useGizmoRef);
 
     // Get the current render parameters
     const RenderParams& getParams() const { return m_params; }
-
     int getDebugMode() const { return m_selectedDebugMode; } // Getter
 
 private:
-    // ImGui windows - each as a separate method for organization
 
-    void renderMainPanel(float& fovRef, double gpuTimeMs, size_t ramBytes); // Pass FOV ref
+    // Initialize ImGui context and style
+    void init();
+
+    void renderMainPanel(float& fovRef, double gpuTimeMs, size_t ramBytes,
+                            std::vector<SDFObject>& objects, int& currentSelectedId,
+                            int& nextSdfId, bool& useGizmoRef);
+
 
     GLFWwindow* m_window;
     RenderParams m_params;
 
-    // Performance monitoring
-    float m_frameTimes[120] = {};
-    int m_frameTimeIndex = 0;
+    int m_selectedDebugMode = 0; // Add a member variable with default
 
     // UI state
     bool m_showDemoWindow = false;
-
-    int m_selectedDebugMode = 0; // Add a member variable with default
-
+    float m_frameTimes[120] = {};
+    int m_frameTimeIndex = 0;
 };
 
 

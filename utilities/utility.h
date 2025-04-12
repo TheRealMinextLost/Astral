@@ -3,18 +3,23 @@
 //
 #pragma once
 #include <string>
+#include <vector>
 #include <glm/gtc/type_ptr.hpp>
 
-class utility {
-public:
-    static std::string loadShaderSource(const std::string& filePath);
-    static glm::mat3 createCameraBasis(const glm::vec3& cameraPos, const glm::vec3& cameraTarget);
+// Forward declaration
+struct SDFObject;
+class Camera;
 
+namespace utility {
+    std::string loadShaderSource(const std::string& filePath);
+    size_t getCurrentRSS(); // Platform-specific RAM usage
 
-    // Returns resident set size (physical memory) in bytes, or 0 on failure.
-    static size_t getCurrentRSS();
-
-};
-
+    // CPU Picking function
+    // Takes dependencies as arguments for better design
+    int performPickingRaymarch(const Camera& cam, // Use const reference
+                               const std::vector<SDFObject>& objects, // Use const reference
+                               double mouseX, double mouseY,
+                               int screenWidth, int screenHeight);
+}
 
 

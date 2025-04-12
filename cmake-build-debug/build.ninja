@@ -183,6 +183,13 @@ build CMakeFiles/Astral.dir/Basic/Camera.cpp.obj: CXX_COMPILER__Astral_unscanned
   OBJECT_DIR = CMakeFiles\Astral.dir
   OBJECT_FILE_DIR = CMakeFiles\Astral.dir\Basic
 
+build CMakeFiles/Astral.dir/ImGizmo/ImGuizmo.cpp.obj: CXX_COMPILER__Astral_unscanned_Debug D$:/Projects/Astral/ImGizmo/ImGuizmo.cpp || cmake_object_order_depends_target_Astral
+  DEP_FILE = CMakeFiles\Astral.dir\ImGizmo\ImGuizmo.cpp.obj.d
+  FLAGS = -g -std=gnu++20 -fdiagnostics-color=always
+  INCLUDES = -ID:/Projects/Astral -ID:/Projects/Astral/cmake-build-debug/_deps/imgui-src -ID:/Projects/Astral/cmake-build-debug/_deps/imgui-src/backends -ID:/Projects/Astral/cmake-build-debug/_deps/glm-src -ID:/Projects/Astral/external/glad/include -ID:/Projects/Astral/cmake-build-debug/_deps/glfw-src/include
+  OBJECT_DIR = CMakeFiles\Astral.dir
+  OBJECT_FILE_DIR = CMakeFiles\Astral.dir\ImGizmo
+
 
 # =============================================================================
 # Link build statements for EXECUTABLE target Astral
@@ -191,7 +198,7 @@ build CMakeFiles/Astral.dir/Basic/Camera.cpp.obj: CXX_COMPILER__Astral_unscanned
 #############################################
 # Link the executable Astral.exe
 
-build Astral.exe: CXX_EXECUTABLE_LINKER__Astral_Debug CMakeFiles/Astral.dir/main.cpp.obj CMakeFiles/Astral.dir/UI/AstralUI.cpp.obj CMakeFiles/Astral.dir/utilities/utility.cpp.obj CMakeFiles/Astral.dir/Basic/Camera.cpp.obj | _deps/glfw-build/src/libglfw3.a _deps/glm-build/glm/libglm.a libglad.a libimgui.a _deps/glfw-build/src/libglfw3.a || _deps/glfw-build/src/libglfw3.a _deps/glm-build/glm/libglm.a libglad.a libimgui.a
+build Astral.exe: CXX_EXECUTABLE_LINKER__Astral_Debug CMakeFiles/Astral.dir/main.cpp.obj CMakeFiles/Astral.dir/UI/AstralUI.cpp.obj CMakeFiles/Astral.dir/utilities/utility.cpp.obj CMakeFiles/Astral.dir/Basic/Camera.cpp.obj CMakeFiles/Astral.dir/ImGizmo/ImGuizmo.cpp.obj | _deps/glfw-build/src/libglfw3.a _deps/glm-build/glm/libglm.a libglad.a libimgui.a _deps/glfw-build/src/libglfw3.a || _deps/glfw-build/src/libglfw3.a _deps/glm-build/glm/libglm.a libglad.a libimgui.a
   FLAGS = -g
   LINK_FLAGS = -static
   LINK_LIBRARIES = -lopengl32  _deps/glfw-build/src/libglfw3.a  _deps/glm-build/glm/libglm.a  libglad.a  libimgui.a  _deps/glfw-build/src/libglfw3.a  -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32
@@ -201,30 +208,6 @@ build Astral.exe: CXX_EXECUTABLE_LINKER__Astral_Debug CMakeFiles/Astral.dir/main
   TARGET_FILE = Astral.exe
   TARGET_IMPLIB = libAstral.dll.a
   TARGET_PDB = Astral.exe.dbg
-
-
-#############################################
-# Utility command for package
-
-build CMakeFiles/package.util: CUSTOM_COMMAND all
-  COMMAND = C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Projects\Astral\cmake-build-debug && "C:\Program Files\JetBrains\CLion 2024.3.5\bin\cmake\win\x64\bin\cpack.exe" --config ./CPackConfig.cmake"
-  DESC = Run CPack packaging tool...
-  pool = console
-  restat = 1
-
-build package: phony CMakeFiles/package.util
-
-
-#############################################
-# Utility command for package_source
-
-build CMakeFiles/package_source.util: CUSTOM_COMMAND
-  COMMAND = C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Projects\Astral\cmake-build-debug && "C:\Program Files\JetBrains\CLion 2024.3.5\bin\cmake\win\x64\bin\cpack.exe" --config ./CPackSourceConfig.cmake D:/Projects/Astral/cmake-build-debug/CPackSourceConfig.cmake"
-  DESC = Run CPack packaging tool for source...
-  pool = console
-  restat = 1
-
-build package_source: phony CMakeFiles/package_source.util
 
 
 #############################################
@@ -301,30 +284,6 @@ build install/strip: phony CMakeFiles/install/strip.util
 # Utility command for uninstall
 
 build _deps/glfw-build/uninstall: phony _deps/glfw-build/CMakeFiles/uninstall
-
-
-#############################################
-# Utility command for package
-
-build _deps/glfw-build/CMakeFiles/package.util: CUSTOM_COMMAND _deps/glfw-build/all
-  COMMAND = C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Projects\Astral\cmake-build-debug && "C:\Program Files\JetBrains\CLion 2024.3.5\bin\cmake\win\x64\bin\cpack.exe" --config ./CPackConfig.cmake"
-  DESC = Run CPack packaging tool...
-  pool = console
-  restat = 1
-
-build _deps/glfw-build/package: phony _deps/glfw-build/CMakeFiles/package.util
-
-
-#############################################
-# Utility command for package_source
-
-build _deps/glfw-build/CMakeFiles/package_source.util: CUSTOM_COMMAND
-  COMMAND = C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Projects\Astral\cmake-build-debug && "C:\Program Files\JetBrains\CLion 2024.3.5\bin\cmake\win\x64\bin\cpack.exe" --config ./CPackSourceConfig.cmake D:/Projects/Astral/cmake-build-debug/CPackSourceConfig.cmake"
-  DESC = Run CPack packaging tool for source...
-  pool = console
-  restat = 1
-
-build _deps/glfw-build/package_source: phony _deps/glfw-build/CMakeFiles/package_source.util
 
 
 #############################################
@@ -604,30 +563,6 @@ build _deps/glfw-build/src/update_mappings: phony _deps/glfw-build/src/CMakeFile
 
 
 #############################################
-# Utility command for package
-
-build _deps/glfw-build/src/CMakeFiles/package.util: CUSTOM_COMMAND _deps/glfw-build/src/all
-  COMMAND = C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Projects\Astral\cmake-build-debug && "C:\Program Files\JetBrains\CLion 2024.3.5\bin\cmake\win\x64\bin\cpack.exe" --config ./CPackConfig.cmake"
-  DESC = Run CPack packaging tool...
-  pool = console
-  restat = 1
-
-build _deps/glfw-build/src/package: phony _deps/glfw-build/src/CMakeFiles/package.util
-
-
-#############################################
-# Utility command for package_source
-
-build _deps/glfw-build/src/CMakeFiles/package_source.util: CUSTOM_COMMAND
-  COMMAND = C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Projects\Astral\cmake-build-debug && "C:\Program Files\JetBrains\CLion 2024.3.5\bin\cmake\win\x64\bin\cpack.exe" --config ./CPackSourceConfig.cmake D:/Projects/Astral/cmake-build-debug/CPackSourceConfig.cmake"
-  DESC = Run CPack packaging tool for source...
-  pool = console
-  restat = 1
-
-build _deps/glfw-build/src/package_source: phony _deps/glfw-build/src/CMakeFiles/package_source.util
-
-
-#############################################
 # Utility command for edit_cache
 
 build _deps/glfw-build/src/CMakeFiles/edit_cache.util: CUSTOM_COMMAND
@@ -703,30 +638,6 @@ build _deps/glfw-build/src/CMakeFiles/update_mappings | ${cmake_ninja_workdir}_d
 # Write statements declared in CMakeLists.txt:
 # D:/Projects/Astral/CMakeLists.txt
 # =============================================================================
-
-
-#############################################
-# Utility command for package
-
-build _deps/glm-build/CMakeFiles/package.util: CUSTOM_COMMAND _deps/glm-build/all
-  COMMAND = C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Projects\Astral\cmake-build-debug && "C:\Program Files\JetBrains\CLion 2024.3.5\bin\cmake\win\x64\bin\cpack.exe" --config ./CPackConfig.cmake"
-  DESC = Run CPack packaging tool...
-  pool = console
-  restat = 1
-
-build _deps/glm-build/package: phony _deps/glm-build/CMakeFiles/package.util
-
-
-#############################################
-# Utility command for package_source
-
-build _deps/glm-build/CMakeFiles/package_source.util: CUSTOM_COMMAND
-  COMMAND = C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Projects\Astral\cmake-build-debug && "C:\Program Files\JetBrains\CLion 2024.3.5\bin\cmake\win\x64\bin\cpack.exe" --config ./CPackSourceConfig.cmake D:/Projects/Astral/cmake-build-debug/CPackSourceConfig.cmake"
-  DESC = Run CPack packaging tool for source...
-  pool = console
-  restat = 1
-
-build _deps/glm-build/package_source: phony _deps/glm-build/CMakeFiles/package_source.util
 
 
 #############################################
@@ -829,30 +740,6 @@ build _deps/glm-build/glm/libglm.a: CXX_STATIC_LIBRARY_LINKER__glm_Debug _deps/g
   PRE_LINK = cd .
   TARGET_FILE = _deps\glm-build\glm\libglm.a
   TARGET_PDB = glm.a.dbg
-
-
-#############################################
-# Utility command for package
-
-build _deps/glm-build/glm/CMakeFiles/package.util: CUSTOM_COMMAND _deps/glm-build/glm/all
-  COMMAND = C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Projects\Astral\cmake-build-debug && "C:\Program Files\JetBrains\CLion 2024.3.5\bin\cmake\win\x64\bin\cpack.exe" --config ./CPackConfig.cmake"
-  DESC = Run CPack packaging tool...
-  pool = console
-  restat = 1
-
-build _deps/glm-build/glm/package: phony _deps/glm-build/glm/CMakeFiles/package.util
-
-
-#############################################
-# Utility command for package_source
-
-build _deps/glm-build/glm/CMakeFiles/package_source.util: CUSTOM_COMMAND
-  COMMAND = C:\WINDOWS\system32\cmd.exe /C "cd /D D:\Projects\Astral\cmake-build-debug && "C:\Program Files\JetBrains\CLion 2024.3.5\bin\cmake\win\x64\bin\cpack.exe" --config ./CPackSourceConfig.cmake D:/Projects/Astral/cmake-build-debug/CPackSourceConfig.cmake"
-  DESC = Run CPack packaging tool for source...
-  pool = console
-  restat = 1
-
-build _deps/glm-build/glm/package_source: phony _deps/glm-build/glm/CMakeFiles/package_source.util
 
 
 #############################################
