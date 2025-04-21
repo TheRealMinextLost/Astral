@@ -80,8 +80,6 @@ add_executable(Astral
         Basic/Camera.cpp
         Basic/Camera.h
         Basic/SDFObject.h
-        ImGizmo/ImGuizmo.h
-        ImGizmo/ImGuizmo.cpp
 )
 
 # Optionally specify runtime output directory

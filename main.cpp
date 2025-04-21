@@ -12,7 +12,7 @@
 #include "UI/AstralUI.h"
 #include "utilities/utility.h"
 #include "Basic/Camera.h"
-#include "ImGizmo/ImGuizmo.h"
+/*#include "ImGizmo/ImGuizmo.h"*/
 #include "Basic/SDFObject.h" // Make sure SDFObjectGPUData is defined here
 
 using namespace glm;
@@ -37,7 +37,6 @@ unsigned int quadVBO = 0;
 GLuint shaderProgram = 0;
 GLuint pickingShaderProgram = 0;
 GLuint sdfDataUBO = 0;
-GLuint gpuTimerQuery = 0;
 GLuint pickingFBO = 0;
 GLuint pickingTexture = 0;
 
@@ -48,15 +47,29 @@ int nextSdfId = 0;
 int selectedObjectId = -1;
 bool useGizmo = false;
 
+// Modal Transform State
+enum class TransformMode { NONE, TRANSLATING, ROTATING, SCALING};
+TransformMode currentTransformMode = TransformMode::NONE;
+
+// Store Initial state when entering modal mode for cancellation
+vec3 initialPosition;
+vec3 initialRotation;
+vec3 initialScale;
+
+//Track mouse position
+double modalStartX = 0.0, modalStartY = 0.0;
+double lastModalMouseX = 0.0, lastModalMouseY = 0.0;
+bool modalTransformActive = true; // flag to indicate if mouse should transform
+
+bool isAxisConstrained = false;
+enum class GizmoAxis { NONE, X, Y, Z } constrainedAxis = GizmoAxis::NONE;
+enum class GizmoSpace {WORLD, LOCAL} currentGizmoSpace = GizmoSpace::WORLD;
+
 // Picking State
 std::map<std::string, GLint> pickingUniformLocs; // Cache for non-UBO picking uniforms
 bool pickRequested = false;
 int pickMouseX = 0;
 int pickMouseY = 0;
-
-// Timing & Performance
-GLuint64 gpuFrameTimeNano = 0; // Last available GPU frame time
-bool gpuTimerQueryInFlight = false; // Should not be strictly needed with new logic
 
 // Helper function to check and print OpenGL errors
 GLenum glCheckError_(const char *file, int line) {
@@ -79,6 +92,59 @@ GLenum glCheckError_(const char *file, int line) {
 }
 #define glCheckError() glCheckError_(__FILE__, __LINE__)
 
+// Helper to find the selected object (you might already have this)
+SDFObject* findSelectedObject(int id) {
+    if (id == -1) return nullptr;
+    for (auto& obj : sdfObjects) {
+        if (obj.id == id) {
+            return &obj;
+        }
+    }
+    return nullptr;
+}
+
+// Helper to apply modal translation based on total mouse delta
+void ApplyModalTranslation(SDFObject* objPtr, double totalDeltaX, double totalDeltaY, int display_w, int display_h) {
+    if (!objPtr) return;
+
+    // Get camera basis
+    vec3 camRight, camUp, camForward;
+    camera.GetBasisVectors(camRight, camUp, camForward); // Assumes camera object is accessible
+
+    // --- Calculate World Delta based on Screen Delta ---
+    // Use depth relative to camera for sensitivity scaling
+    float depth = distance(camera.Position, objPtr->position); // Or initialPosition? Using current for now.
+    float tanHalfFovY = tan(radians(camera.Fov * 0.5f));
+    float worldUnitsPerPixelY = (depth * tanHalfFovY * 2.0f) / (float)display_h;
+    float worldUnitsPerPixelX = worldUnitsPerPixelY * ((float)display_w / (float)display_h) * 0.5f;
+
+    vec3 worldDelta = (camRight * (float)totalDeltaX * worldUnitsPerPixelX) -
+                      (camUp * (float)totalDeltaY * worldUnitsPerPixelY); // Invert Y
+
+    // --- Apply Constraints ---
+    if (isAxisConstrained) {
+        // Project worldDelta onto the constrained axis
+        vec3 axisVec;
+        if (constrainedAxis == GizmoAxis::X) axisVec = vec3(1.0f, 0.0f, 0.0f);
+        else if (constrainedAxis == GizmoAxis::Y) axisVec = vec3(0.0f, 1.0f, 0.0f);
+        else axisVec = vec3(0.0f, 0.0f, 1.0f); // Z
+
+        // If LOCAL mode, transform axis into world space first? Needs object orientation.
+        // If LOCAL mode, transform axis into world space first? Needs object orientation.
+        // For simplicity, let's assume WORLD constraints for now.
+        // Local constraints require transforming the axis by the object's initial rotation.
+        if (currentGizmoSpace == GizmoSpace::LOCAL) {
+            quat initialQuat = quat(radians(initialRotation));
+            mat4 initialRotationMatrix = mat4_cast(initialQuat);
+            axisVec = vec3(initialRotationMatrix * vec4(axisVec, 0.0));
+        }
+
+        worldDelta = axisVec * dot(worldDelta, axisVec); // Project delta onto axis
+    }
+
+    // Apply the final delta to the initial position
+    objPtr->position = initialPosition + worldDelta;
+}
 // --- FBO Setup ---
 void setupPickingFBO(int width, int height) {
     if (pickingFBO) { glDeleteFramebuffers(1, &pickingFBO); glDeleteTextures(1, &pickingTexture); pickingFBO = 0; pickingTexture = 0; }
@@ -133,9 +199,13 @@ GLuint linkProgram(GLuint vertexShader, GLuint fragmentShader) {
 
 // --- Picking ---
 void requestPicking(int mouseX, int mouseY) {
-    pickRequested = true;
-    pickMouseX = mouseX;
-    pickMouseY = mouseY;
+    if (currentTransformMode == TransformMode::NONE) {
+        pickRequested = true;
+        pickMouseX = mouseX;
+        pickMouseY = mouseY;
+    } else {
+        std::cout << "Picking request ignored (modal mode active)" << std::endl;
+    }
 }
 
 void handlePickingRequest(int windowWidth, int windowHeight) {
@@ -292,7 +362,6 @@ int main() {
 
     // --- OpenGL Setup & Timer ---
     glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glGenQueries(2, &gpuTimerQuery);
 
 
     // --- Init UI & Callbacks ---
@@ -396,9 +465,9 @@ int main() {
     SDFObject box1(nextSdfId++); box1.type = SDFType::BOX; box1.position = vec3(1.5f, 0.0f, 0.0f); box1.halfSize = vec3(0.6f, 0.7f, 0.8f); box1.color = vec3(1.0f, 1.0f, 1.0f); sdfObjects.push_back(box1);
 
 
-    // --- Gizmo State ---
+    /*// --- Gizmo State ---
     ImGuizmo::OPERATION currentGizmoOperation = ImGuizmo::TRANSLATE;
-    ImGuizmo::MODE currentGizmoMode = ImGuizmo::WORLD;
+    ImGuizmo::MODE currentGizmoMode = ImGuizmo::WORLD;*/
 
     // --- Timing Variables ---
     cout << "Initialization complete. Entering render loop..." << endl;
@@ -413,24 +482,7 @@ int main() {
     // ======== RENDER LOOP ========
     while (!glfwWindowShouldClose(window))
     {
-        // --- 1. Check and Get PREVIOUS Frame's Timer Result ---
-        GLint timerResultAvailable = 0;
-        if (gpuTimerQuery != 0) { // Check if query object is valid
-            // Non-blocking check if the result from the query ended last frame is ready
-            glGetQueryObjectiv(gpuTimerQuery, GL_QUERY_RESULT_AVAILABLE, &timerResultAvailable);
-            if (timerResultAvailable) {
-                // Result is ready, get it.
-                glGetQueryObjectui64v(gpuTimerQuery, GL_QUERY_RESULT, &gpuFrameTimeNano);
 
-                // Now gpuFrameTimeNano holds the latest *available* measurement
-            }
-            // Else: Result not ready yet, gpuFrameTimeNano keeps its old value.
-        }
-
-        // --- 2. Begin CURRENT Frame's Timer Query ---
-        if (gpuTimerQuery != 0) {
-            glBeginQuery(GL_TIME_ELAPSED, gpuTimerQuery);
-        }
         // --- Timing & Basic Events ---
         double currentTime = glfwGetTime();
         deltaTime = currentTime - lastTime;
@@ -443,7 +495,7 @@ int main() {
 
         // --- Begin ImGui/ImGuizmo Frame ---
         ui.newFrame();
-        ImGuizmo::BeginFrame();
+        /*ImGuizmo::BeginFrame();*/
 
         int display_w, display_h;
         glfwGetFramebufferSize(window, &display_w, &display_h);
@@ -453,19 +505,191 @@ int main() {
 
         // --- Handle Inputs ---
         ImGuiIO& io = ImGui::GetIO();
-        // Gizmo Keyboard Shortcuts
-        if (selectedObjectId != -1 && !io.WantCaptureKeyboard) {
-            if (ImGui::IsKeyPressed(ImGuiKey_G)) { currentGizmoOperation = ImGuizmo::TRANSLATE; }
-            if (ImGui::IsKeyPressed(ImGuiKey_R)) { currentGizmoOperation = ImGuizmo::ROTATE; }
-            if (ImGui::IsKeyPressed(ImGuiKey_S)) { currentGizmoOperation = ImGuizmo::SCALE; }
-            if (ImGui::IsKeyPressed(ImGuiKey_L)) { currentGizmoMode = (currentGizmoMode == ImGuizmo::LOCAL) ? ImGuizmo::WORLD : ImGuizmo::LOCAL; }
-            if (ImGui::IsKeyPressed(ImGuiKey_D)) { selectedObjectId = -1; useGizmo = false; }
-        }
-        // Camera Keyboard Movement
-        if (!io.WantCaptureMouse && !io.WantCaptureKeyboard) {
+        bool consumedKeyboardInput = false; // Prevent camera move if keys handled
+        bool consumedMouseInput = false; // Prevent picking if mouse confirms/cancels
+
+        // Modal transform Input Handling
+        if (currentTransformMode != TransformMode::NONE && selectedObjectId != -1) {
+            consumedKeyboardInput = true; // We are handling input in modal mode
+
+            // Get selected object pointer (needed often)
+            SDFObject* objPtr = findSelectedObject(selectedObjectId);
+
+            // Confirmation
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)&& !io.WantCaptureMouse || ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+                std::cout << "Modal Transform Confirmed" << std::endl;
+                currentTransformMode = TransformMode::NONE; // exit modal mode
+                modalTransformActive = false;
+                isAxisConstrained = false;
+                constrainedAxis = GizmoAxis::NONE;
+                consumedMouseInput = true;
+            }
+            // Cancellation
+            else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) && !io.WantCaptureMouse || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+                std::cout << "Modal Transform Canceled" << std::endl;
+                SDFObject* objPtr = findSelectedObject(selectedObjectId); // Need helper function
+                if (objPtr) {
+                    objPtr->position = initialPosition;
+                    objPtr->rotation = initialRotation;
+                    objPtr->scale = initialScale;
+                }
+                currentTransformMode = TransformMode::NONE; // exit modal mode
+                modalTransformActive = false;
+                isAxisConstrained = false;
+                constrainedAxis = GizmoAxis::NONE;
+                if (!ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+                    consumedMouseInput = true;
+                }
+            }
+
+            // Axis constraint keys
+            else if (!io.WantCaptureKeyboard) { // Check keyboard focus
+                GizmoAxis newlyPressedAxis = GizmoAxis::NONE;
+                if (ImGui::IsKeyPressed(ImGuiKey_X)) newlyPressedAxis = GizmoAxis::X;
+                else if (ImGui::IsKeyPressed(ImGuiKey_Y)) newlyPressedAxis = GizmoAxis::Y;
+                else if (ImGui::IsKeyPressed(ImGuiKey_Z)) newlyPressedAxis = GizmoAxis::Z;
+
+                if (newlyPressedAxis != GizmoAxis::NONE) {
+                    if (isAxisConstrained && constrainedAxis == newlyPressedAxis) {
+                        isAxisConstrained = false; // toggle off
+                        constrainedAxis = GizmoAxis::NONE;
+                        std::cout << "Modal constraint toggled off" << std::endl;
+                    } else {
+                        isAxisConstrained = true; // toggle on / Switch
+                        constrainedAxis = newlyPressedAxis;
+                        std::cout << "Modal Constraint: " << (constrainedAxis == GizmoAxis::X ? "X" : (constrainedAxis == GizmoAxis::Y ? "Y" : "Z")) << std::endl;
+                    }
+                    // Immediately update position based on new constraint and current total mouse delta
+                    double currentMouseX, currentMouseY;
+                    glfwGetCursorPos(window, &currentMouseX, &currentMouseY);
+                    double totalDeltaX = currentMouseX - modalStartX;
+                    double totalDeltaY = currentMouseY - modalStartY;
+                    if (objPtr) {
+                        objPtr->position = initialPosition;
+                        objPtr->rotation = initialRotation;
+                        objPtr->scale = initialScale;
+                        if (currentTransformMode == TransformMode::TRANSLATING) {
+                            ApplyModalTranslation(objPtr, totalDeltaX, totalDeltaY, display_w, display_h);
+                        } // R/S later
+                    }
+                    lastModalMouseX = currentMouseX; // Update last mouse position *for next frame's delta*
+                    lastModalMouseY = currentMouseY;
+                }
+                else if (ImGui::IsKeyPressed(ImGuiKey_L)) {
+                    currentGizmoSpace = (currentGizmoSpace == GizmoSpace::LOCAL) ? GizmoSpace::WORLD : GizmoSpace::LOCAL;
+                    double currentMouseX, currentMouseY;
+                    glfwGetCursorPos(window, &currentMouseX, &currentMouseY);
+                    double totalDeltaX = currentMouseX - modalStartX;
+                    double totalDeltaY = currentMouseY - modalStartY;
+                    if (objPtr) {
+                        objPtr->position = initialPosition;
+                        objPtr->rotation = initialRotation;
+                        objPtr->scale = initialScale;
+                        if (currentTransformMode == TransformMode::TRANSLATING) {
+                            ApplyModalTranslation(objPtr, totalDeltaX, totalDeltaY, display_w, display_h);
+                        }// Add R/S Later
+                    }
+                    lastModalMouseX = currentMouseX;
+                    lastModalMouseY = currentMouseY;
+                } // End Axis/L key checks
+            }
+
+
+            // Mouse Movement Transformation (ONLY if active)
+            if (currentTransformMode != TransformMode::NONE) {
+                double currentMouseX, currentMouseY;
+                glfwGetCursorPos(window, &currentMouseX, &currentMouseY);
+
+                if (abs(currentMouseX - lastModalMouseX) > 1e-3 || abs(currentMouseY - lastModalMouseY) > 1e-3) {
+                    // Calculate total mouse delta since modal start
+                    double totalDeltaX = currentMouseX - modalStartX;
+                    double totalDeltaY = currentMouseY - modalStartY;
+
+                    if (objPtr) {
+                        // Revert to initial state before applying delta to prevent accumulation errors
+                        objPtr->position = initialPosition;
+                        objPtr->rotation = initialRotation;
+                        objPtr->scale = initialScale;
+
+                        // Apply Transform base on Mode and Constraints
+                        if (currentTransformMode == TransformMode::TRANSLATING) {
+                            ApplyModalTranslation(objPtr, totalDeltaX, totalDeltaY, display_w, display_h); // New helper function
+                        } else if (currentTransformMode == TransformMode::ROTATING) {
+                            // ApplyModalRotation(objPtr, totalDeltaX, totalDeltaY); // Placeholder
+                        } else if (currentTransformMode == TransformMode::SCALING) {
+                            // ApplyModalScaling(objPtr, totalDeltaX, totalDeltaY); // Placeholder
+                        }
+                    }
+
+                    lastModalMouseX = currentMouseX; // Update last mouse position *for next frame's delta*
+                    lastModalMouseY = currentMouseY;
+                }
+            }
+        } // End Modal Transform Input Handling
+
+        // Normal Mode Input Handling (selection & entering Modal Mode)
+        if (currentTransformMode == TransformMode::NONE && selectedObjectId != -1 && !io.WantCaptureKeyboard) {
+            SDFObject* objPtr = findSelectedObject(selectedObjectId);
+
+            // Enter Modal Translate (G)
+            if (ImGui::IsKeyPressed(ImGuiKey_G) && objPtr) {
+                std::cout << "Entering Modal Transform (Translate)" << std::endl;
+                currentTransformMode = TransformMode::TRANSLATING;
+                SDFObject* objPtr = findSelectedObject(selectedObjectId);
+                if (objPtr) { // Store initial state
+                    initialPosition = objPtr->position;
+                    initialRotation = objPtr->rotation;
+                    initialScale = objPtr->scale;
+                }
+                glfwGetCursorPos(window, &modalStartX, &modalStartY); // Record starting mouse pos
+                lastModalMouseX = modalStartX;
+                lastModalMouseY = modalStartY;
+                modalTransformActive = true; // Start transforming immediately
+                isAxisConstrained = false; // reset constraints
+                constrainedAxis = GizmoAxis::NONE; // reset constraints
+                consumedKeyboardInput = true; // We are handling input in modal mode
+            }
+            // --- Enter Modal Rotate (R) ---
+            else if (ImGui::IsKeyPressed(ImGuiKey_R) && objPtr) {
+                std::cout << "Entering Modal Rotate" << std::endl;
+                currentTransformMode = TransformMode::ROTATING;
+                if (objPtr) { /* Store initial State */ initialPosition = objPtr->position; initialRotation = objPtr->rotation; initialScale = objPtr->scale; }
+                glfwGetCursorPos(window, &modalStartX, &modalStartY);
+                lastModalMouseX = modalStartX; lastModalMouseY = modalStartY;
+                modalTransformActive = true;
+                isAxisConstrained = false; constrainedAxis = GizmoAxis::NONE;
+                consumedKeyboardInput = true;
+            }
+            // --- Enter Modal Scale (S) ---
+            else if (ImGui::IsKeyPressed(ImGuiKey_S)) {
+                std::cout << "Entering Modal Scale" << std::endl;
+                currentTransformMode = TransformMode::SCALING;
+                SDFObject* objPtr = findSelectedObject(selectedObjectId);
+                if(objPtr) { /* Store initial state */ initialPosition = objPtr->position; initialRotation = objPtr->rotation; initialScale = objPtr->scale; }
+                glfwGetCursorPos(window, &modalStartX, &modalStartY);
+                lastModalMouseX = modalStartX; lastModalMouseY = modalStartY;
+                modalTransformActive = true;
+                isAxisConstrained = false; constrainedAxis = GizmoAxis::NONE;
+                consumedKeyboardInput = true;
+            }
+            // --- Deselect (D) --- (Can still deselect if not in modal mode)
+            else if (ImGui::IsKeyPressed(ImGuiKey_D)) {
+                selectedObjectId = -1;
+                useGizmo = false;
+                consumedKeyboardInput = true;
+            }
+            // --- Local/World Toggle (L) --- (Can still toggle if not in modal mode)
+            else if (ImGui::IsKeyPressed(ImGuiKey_L)) {
+                currentGizmoSpace = (currentGizmoSpace == GizmoSpace::LOCAL) ? GizmoSpace::WORLD : GizmoSpace::LOCAL;
+                 std::cout << "Constraint Space Set To: " << (currentGizmoSpace == GizmoSpace::LOCAL ? "LOCAL" : "WORLD") << std::endl;
+                consumedKeyboardInput = true;
+            }
+        } // End normal mode input handling
+
+        // Camera Keyboard Movement (unmodified, runs if input not consumed by modal/gizmo keys)
+        if (currentTransformMode == TransformMode::NONE && !consumedKeyboardInput && !io.WantCaptureMouse && !io.WantCaptureKeyboard) {
             camera.ProcessKeyboardMovement(window, static_cast<float>(deltaTime));
         }
-
         // --- Perform GPU Picking (if requested by previous frame's input) ---
         handlePickingRequest(display_w, display_h);
 
@@ -473,82 +697,11 @@ int main() {
         glViewport(0, 0, display_w, display_h);
         float aspectRatio = (display_w > 0 && display_h > 0) ? static_cast<float>(display_w) / static_cast<float>(display_h) : 1.0f;
 
-        // --- ImGuizmo Setup & Manipulation ---
-        ImGuizmo::SetOrthographic(false);
-        ImGuizmo::SetDrawlist(ImGui::GetBackgroundDrawList(ImGui::GetMainViewport())); // Draw to viewport background
-        ImGuizmo::SetRect(0, 0, (float)display_w, (float)display_h);
-
-        if (useGizmo && selectedObjectId != -1) {
-            mat4 viewMatrix = camera.GetViewMatrix();
-            mat4 projectionMatrix = camera.GetProjectionMatrix(aspectRatio);
-
-            SDFObject* selectedObjPtr = nullptr;
-            for (auto& obj : sdfObjects) { if (obj.id == selectedObjectId) { selectedObjPtr = &obj; break; } }
-
-            if (selectedObjPtr) {
-                mat4 modelMatrix = selectedObjPtr->getModelMatrix();
-                vec3 oldPos = selectedObjPtr->position;
-                vec3 oldRot = selectedObjPtr->rotation;
-                vec3 oldScale = selectedObjPtr->scale;
-
-                // --- Always Call Manipulate for Drawing, Add Logging ---
-                ImGuiIO& io = ImGui::GetIO(); // Get IO state
-
-                // Log state *before* the call
-                std::cout << "Frame Pre-Manipulate: ID=" << selectedObjectId
-                          << " WantCapture=" << io.WantCaptureMouse
-                          << " MouseDown=" << io.MouseDown[0]
-                          // ----- ADD THIS ----- VVVV
-                          << " IsDragging=" << ImGui::IsMouseDragging(0)
-                          // -------------------- ^^^^
-                          << " GizmoIsUsing(Pre)=" << ImGuizmo::IsUsing()
-                          << " GizmoIsOver=" << ImGuizmo::IsOver() << std::endl;
-
-                // ***** CRITICAL: Call Manipulate unconditionally if selected *****
-                // This ensures the gizmo is DRAWN.
-                ImGuizmo::Manipulate(value_ptr(viewMatrix), value_ptr(projectionMatrix),
-                                     currentGizmoOperation, currentGizmoMode, value_ptr(modelMatrix));
-
-                // Check state *after* the call
-                bool usingAfterManipulate = ImGuizmo::IsUsing();
-                std::cout << "Frame Post-Manipulate: GizmoIsUsing(Post)=" << usingAfterManipulate << std::endl;
-
-                // Now, decide whether to *apply* the manipulation result based ONLY on IsUsing()
-                if (usingAfterManipulate) {
-                    // If ImGuizmo reports it's being used, proceed with decomposition and update checks
-                    std::cout << "Frame Processing Update (GizmoIsUsing is true)" << std::endl;
-
-                    vec3 newPos, newRot, newScale;
-                    ImGuizmo::DecomposeMatrixToComponents(value_ptr(modelMatrix), value_ptr(newPos), value_ptr(newRot), value_ptr(newScale));
-
-                    // Check if the matrix actually changed
-                    if (!all(epsilonEqual(oldPos, newPos, 1e-5f)) ||
-                        !all(epsilonEqual(oldRot, newRot, 1e-3f)) ||
-                        !all(epsilonEqual(oldScale, newScale, 1e-5f)))
-                    {
-                        if (currentGizmoOperation == ImGuizmo::SCALE) { newScale = max(newScale, vec3(0.001f)); }
-                        selectedObjPtr->position = newPos;
-                        selectedObjPtr->rotation = newRot;
-                        selectedObjPtr->scale = newScale;
-                        std::cout << "  >>> Gizmo Applied Update to ID " << selectedObjPtr->id << std::endl;
-                    } else {
-                         std::cout << "  Gizmo IsUsing, but matrix unchanged." << std::endl;
-                    }
-                }
-                // --- End Update Application Block ---
-
-            } else {
-                // Object not found, deselect (safety check)
-                std::cout << "Warning: useGizmo=true but selectedObjPtr is null for ID=" << selectedObjectId << std::endl;
-                selectedObjectId = -1;
-                useGizmo = false;
-            }
-        } // End if (useGizmo && selectedObjectId != -1)
 
         // --- Create ImGui UI Windows/Controls ---
         const RenderParams& params = ui.getParams(); // Get params for main render pass uniforms
         // Pass the last valid gpuFrameTimeNano reading
-        ui.createUI(camera.Fov, (double)gpuFrameTimeNano / 1e6, currentRSS,
+        ui.createUI(camera.Fov, currentRSS,
                       sdfObjects, selectedObjectId, nextSdfId, useGizmo);
          // Check after UI logic
 
@@ -577,12 +730,6 @@ int main() {
         // --- Render ImGui Draw Data ---
         // IMPORTANT: This should be inside the query if you want to measure UI render time
         ui.render();
-
-        // --- 3. End CURRENT Frame's Timer Query ---
-        if (gpuTimerQuery != 0) {
-            glEndQuery(GL_TIME_ELAPSED);
-            // No glCheckError() immediately after glEndQuery
-        }
 
         // --- Swap Buffers ---
         glfwMakeContextCurrent(window); // Ensure main context is current

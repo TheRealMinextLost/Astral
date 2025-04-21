@@ -138,7 +138,7 @@ void AstralUI::newFrame() {
 }
 
 
-void AstralUI::createUI(float& fovRef, double gpuTimeMs, size_t ramBytes,
+void AstralUI::createUI(float& fovRef, size_t ramBytes,
                       vector<SDFObject>& objects, int& currentSelectedId,
                       int& nextSdfId, bool& useGizmoRef)
 {
@@ -146,14 +146,14 @@ void AstralUI::createUI(float& fovRef, double gpuTimeMs, size_t ramBytes,
 
     if (Begin("Astral Settings", &m_showSettingsWindow)) {
         // Call the panel rendering function ONLY if Begin() didn't return false (e.g., window is not collapsed)
-        renderMainPanel(fovRef, gpuTimeMs, ramBytes, objects, currentSelectedId, nextSdfId, useGizmoRef);
+        renderMainPanel(fovRef, ramBytes, objects, currentSelectedId, nextSdfId, useGizmoRef);
     }
     // Always call End() to match Begin()
     End();
 }
 
 
-void AstralUI::renderMainPanel(float& fovRef, double gpuTimeMs, size_t ramBytes,
+void AstralUI::renderMainPanel(float& fovRef, size_t ramBytes,
                              vector<SDFObject>& objects, int& currentSelectedId,
                              int& nextSdfId, bool& useGizmoRef)
 {
@@ -315,7 +315,6 @@ void AstralUI::renderMainPanel(float& fovRef, double gpuTimeMs, size_t ramBytes,
         Text("FPS: %.1f", io.Framerate);
         Text("Frame Time: %.3f ms", io.Framerate > 0 ? (1000.0f / io.Framerate) : 0.0f);
         // --- GPU Timing ---
-        Text("GPU Raymarch Time: %.3f ms", gpuTimeMs); // Display GPU time
         Separator();
 
         // Plot frame times

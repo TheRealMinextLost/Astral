@@ -30,7 +30,7 @@ layout (std140, binding = 0) uniform SDFBlock {
 
 
 // Ray Marching Parameters
-const int MAX_STEPS = 200;
+const int MAX_STEPS = 50;
 const float MAX_DIST = 100.0;
 const float HIT_THRESHOLD = 0.01;
 

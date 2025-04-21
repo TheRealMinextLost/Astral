@@ -1,36 +1,61 @@
 //
 // Cpp Class, handles player input for the camera
 //
+#define GLM_ENABLE_EXPERIMENTAL
 
 #include "Camera.h"
 #include <iostream> // For debugging
-#include <algorithm>
 #include <imgui_impl_glfw.h>
 #include "Basic/SDFObject.h"
-#include "ImGizmo/ImGuizmo.h"
 #include "utilities/utility.h"
 #include <imgui.h>
-#include "utilities/utility.h"
-#include "Basic/SDFObject.h"
 #include "vector"
-#include "ImGizmo/ImGuizmo.h"
+#include "GLFW/glfw3.h"
+#include <glm/gtx/quaternion.hpp> // Include quaternion helpers like lookAt, angleAxis
+#include <glm/gtc/constants.hpp> // <<< ADD THIS INCLUDE
 
 
-using namespace glm;
 
-void requestPicking(int mouseX, int mouseY);
 
+// External global referenced by callbacks
 extern std::vector<SDFObject> sdfObjects;
 extern int selectedObjectId;
 extern bool useGizmo;
+extern void requestPicking(int mouseX, int mouseY);
 
-
+using namespace glm;
 
 Camera::Camera(vec3 position, vec3 target, vec3 worldUp, float fov)
-                : Position(position), Target(target), WorldUp(worldUp), Fov(fov) {}
+                : Target(target), WorldUp(worldUp), Fov(fov) {
+    Distance = distance(position, target);
+    if (Distance < 1e-5f) {
+        Distance = 5.0f; // Default distance if too close
+        position = target + vec3(0.0f, 0.0f, Distance);
+    }
+    Position = position;
 
+    // Calculate intial orientation quaternion
+    vec3 initialDirection = normalize(Position - Target);
+    Orientation = quatLookAt(-initialDirection,WorldUp); // Look from position toward target
+
+    firstMouse = true;
+    LeftMouseDown = false;
+    RightMouseDown = false;
+    IsOrbiting = false;
+    IsPanning = false;
+}
+
+void Camera::UpdatePositionFromOrientation() {
+    // Calculate the forward vector relative to the orientation
+    // The position offset should be along this direction, scaled by distance
+    vec3 offsetDirection = Orientation * vec3(0.0f, 0.0f, 1.0f);
+    Position = Target + offsetDirection * Distance;
+}
+
+// Core methods
 mat4 Camera::GetViewMatrix() const {
-    return lookAt(Position, Target, WorldUp);
+    vec3 currentUp = Orientation * vec3(0.0f, 1.0f, 0.0f);
+    return lookAt(Position, Target, currentUp);
 }
 
 glm::mat4 Camera::GetProjectionMatrix(float aspectRatio, float nearPlane, float farPlane) const {
@@ -39,123 +64,119 @@ glm::mat4 Camera::GetProjectionMatrix(float aspectRatio, float nearPlane, float 
 
 // Inside Camera.cpp
 void Camera::GetBasisVectors(vec3 &outRight, vec3 &outUp, vec3 &outForward) const {
-    // Forward vector points FROM position TOWARDS target
-    outForward = Target - Position;
-    float forwardLenSq = dot(outForward, outForward);
-    if (forwardLenSq < 1e-10f) { // Position and Target are too close
-        // Fallback: Assume looking down -Z from current position
-        outForward = vec3(0.0f, 0.0f, -1.0f);
-        outRight = vec3(1.0f, 0.0f, 0.0f);
-        outUp = vec3(0.0f, 1.0f, 0.0f);
-        // std::cerr << "Warning: Camera Position and Target are nearly identical!" << std::endl;
-        return;
-    }
-    outForward = normalize(outForward); // Normalize valid forward vector
-
-    // Calculate Right vector using cross product with a reliable Up direction
-    vec3 referenceUp = WorldUp; // Start with world up
-    if (abs(dot(outForward, referenceUp)) > 0.9999f) { // If Forward is aligned with WorldUp
-        // Use world X axis as reference up instead
-        referenceUp = vec3(1.0f, 0.0f, 0.0f);
-        // If Forward is ALSO aligned with world X (extremely unlikely unless looking along Y at origin)
-        if (abs(dot(outForward, referenceUp)) > 0.9999f) {
-            referenceUp = vec3(0.0f, 0.0f, 1.0f); // Use world Z axis
-        }
-    }
-
-    outRight = normalize(cross(outForward, referenceUp));
-    // Check if cross product resulted in zero vector (shouldn't with the referenceUp logic)
-    if(length(outRight) < 1e-6f) {
-        std::cerr << "Error: Failed to calculate Right vector!" << std::endl;
-        // Provide a default orthogonal basis
-        outRight = vec3(1.0f, 0.0f, 0.0f);
-        outUp = vec3(0.0f, 1.0f, 0.0f);
-        return;
-    }
-
-    // Recalculate the true Up vector
-    outUp = normalize(cross(outRight, outForward));
+    // Derive basis vectors directly from the orientation quaternion
+    outRight = Orientation * vec3(0.0f, 0.0f, -1.0f); // Camera looks down -Z
+    outUp = Orientation * vec3(0.0f, 1.0f, 0.0f);       // Camera local up is +Y
+    outRight = Orientation * vec3(1.0f, 0.0f, 0.0f);    // Camera local right is +X
 }
 
 mat3 Camera::GetBasisMatrix() const {
-    vec3 right, up, forward; GetBasisVectors(right, up, forward); return mat3(right, up, -forward);
+    return mat3_cast(Orientation);
 }
 
-// Refined Orbit Logic
+// Quaternion-based Orbit
 void Camera::ProcessOrbit(double xoffset, double yoffset) {
-    vec3 directionToCamera = Position - Target; float distance = length(directionToCamera);
+    if (abs(xoffset) < 1e-6f && abs(yoffset) < 1e-6f) return;
 
-    if (distance < 1e-5f) return; vec3 normDirToCamera = normalize(directionToCamera);
-
-    vec3 camRight, camUp, camForward; GetBasisVectors(camRight, camUp, camForward);
     float yawAngle = -static_cast<float>(xoffset) * OrbitSensitivity;
     float pitchAngle = -static_cast<float>(yoffset) * OrbitSensitivity;
-    float currentPitch = asin(clamp(dot(normDirToCamera, normalize(WorldUp)), -1.0f, 1.0f));
-    float maxPitch = radians(89.9f);
 
-    if (currentPitch + pitchAngle > maxPitch) { pitchAngle = maxPitch - currentPitch; }
-    else if (currentPitch + pitchAngle < -maxPitch) { pitchAngle = -maxPitch - currentPitch; }
-    mat4 yawRotation = rotate(mat4(1.0f), yawAngle, WorldUp);
+    // Create Yaw rotation around the world Up axis
+    quat yawRotation = angleAxis(yawAngle, WorldUp);
 
-    mat4 pitchRotation = rotate(mat4(1.0f), pitchAngle, camRight);
-    vec3 finalNormDir = normalize(vec3(yawRotation * pitchRotation * vec4(normDirToCamera, 0.0f)));
-    if (isnan(finalNormDir.x) || isinf(finalNormDir.x)) { std::cerr << "Orbit Warning: NaN/Inf detected!" << std::endl; return; }
-    Position = Target + finalNormDir * distance;
+    // Create Pitch rotation around the Camera's Local Right axis
+    vec3 localRight = Orientation * vec3(1.0f, 0.0f, 0.0f);
+    quat pitchRotation = angleAxis(pitchAngle, localRight);
+
+    // Check if applying pitch would violate the limit
+    quat potentialOrientationAfterPitch = normalize(pitchRotation * Orientation);
+    vec3 potentialUpAfterPitch = potentialOrientationAfterPitch * vec3(0.0f, 1.0f, 0.0f);
+
+    // Define the limit
+    float minAngleWithWorldUp = radians(0.5f);
+    float minAllowedDotUp = sin(minAngleWithWorldUp);
+
+
+    bool pitchBlocked = false;
+    if (dot(potentialUpAfterPitch, WorldUp) < minAllowedDotUp && pitchAngle < 0.0f) {
+        pitchBlocked = true;
+        std::cout << "Pitch Down Clamped" << std::endl;
+    } else if (dot(potentialUpAfterPitch, WorldUp) < minAllowedDotUp && pitchAngle > 0.0f) {
+        pitchBlocked = true;
+        std::cout << "Pitch Up Clamped" << std::endl;
+    }
+
+    // Combine rotations: Apply pitch locally, then yaw globally
+    quat finalDeltaRotation;
+    if (pitchBlocked) {
+        finalDeltaRotation = yawRotation;
+    } else {
+        finalDeltaRotation = yawRotation * pitchRotation;
+    }
+
+    // Apply the calculated rotation
+    Orientation = normalize(finalDeltaRotation * Orientation);
+
+    // Update Position
+    UpdatePositionFromOrientation();
+
+
 }
 
 void Camera::ProcessPan(double xoffset, double yoffset) {
     vec3 right, up, forward;
     GetBasisVectors(right, up, forward); // use derived vectors
 
-    // Calculate displacement based on sensitivity
-    // Movement amount can depend on distance to keep pan speed consistent-ish
-    float distance = max(0.1f, length(Position - Target)); // Ensure distance is positive
-    vec3 translation = (-right * static_cast<float>(xoffset) * PanSensitivity * distance) +
-                            (up * static_cast<float>(yoffset) * PanSensitivity * distance);
+    // Panning moves the target point perpendicular to the view direction
+    float distFactor = max(0.1f, Distance) * PanSensitivity;
+    vec3 translation = (-right * static_cast<float>(xoffset) * distFactor) +
+                        (up * static_cast<float>(yoffset) * distFactor);
 
-    Position += translation;
+    //Apply translation to the target Point
     Target += translation;
+
+    // Position automatically follows the target when recalculated
+    UpdatePositionFromOrientation();
 }
 
 void Camera::ProcessZoom(double yoffset) {
-    vec3 direction = Target - Position;
-    float distance = length(direction);
-    if (distance < 1e-3f && yoffset > 0) return;
+    // Adjust distance exponentially or linearly
+    float zoomFactor = pow(0.95f, static_cast<float>(yoffset));
+    float deltaDist = -static_cast<float>(yoffset) * ZoomSensitivity * zoomFactor;
+    float newDistance = max(0.1f, Distance + deltaDist);
 
-    // Calculate new distance, prevent zooming too close or past target
-    float newDistance = max(0.1f, distance - static_cast<float>(yoffset) * ZoomSensitivity * distance * 0.1f);
-
-    Position = Target - (normalize(direction) * newDistance);
+    if (abs(newDistance - Distance) > 1e-6f) {
+        Distance = newDistance;
+        UpdatePositionFromOrientation();
+    }
 }
 
 void Camera::ProcessKeyboardMovement(GLFWwindow *window, float deltaTime) {
-    float velocity = 5.0f * deltaTime;
+    float velocity = 2.0f * Distance * deltaTime;
+    velocity = max(0.5f * deltaTime, velocity);
 
     vec3 right, up, forward;
     GetBasisVectors(right, up, forward);
 
-    vec3 moveInput(0.0f);
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-        moveInput += forward; // Move forward (along -forward axis)
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        moveInput -= forward; // Move backward
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        moveInput -= right; // Strafe Left
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        moveInput += right; // Strafe Right
-    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
-        moveInput += WorldUp; // Move up globally
-    if (glfwGetKey(window,GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS || glfwGetKey(window,GLFW_KEY_Q) == GLFW_PRESS)
-        moveInput -= WorldUp;
+    if (ImGui::IsMouseDown(RightMouseDown)) {
+        vec3 moveInputWorld(0.0f);
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) moveInputWorld += forward;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) moveInputWorld -= forward;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) moveInputWorld -= right;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) moveInputWorld += right;
+        // Global up/down movement
+        if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) moveInputWorld += WorldUp;
+        if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) moveInputWorld -= WorldUp;
 
-    if (length(moveInput) > 1e-6f) {
-        vec3 moveDir = normalize(moveInput) * velocity;
-        Position += moveDir;
-        Target += moveDir;
+        if (length(moveInputWorld) > 1e-6f) {
+            vec3 moveDelta= normalize(moveInputWorld) * velocity;
+            Target += moveDelta;
+            UpdatePositionFromOrientation();
+        }
     }
+
 }
 
-// --- Simplified MouseButtonCallback ---
 // --- Simplified MouseButtonCallback ---
 void Camera::MouseButtonCallback(GLFWwindow *window, int button, int action, int mods) {
     // Let ImGui process the event first
@@ -179,7 +200,7 @@ void Camera::MouseButtonCallback(GLFWwindow *window, int button, int action, int
     Camera* camera = static_cast<Camera*>(glfwGetWindowUserPointer(window));
     if (!camera) return;
 
-    // Reset firstMouse flag for camera movement delta calculation on any press
+    // Reset first Mouse flag for camera movement delta calculation on any press
     if (action == GLFW_PRESS) {
         camera->firstMouse = true;
     }
@@ -193,10 +214,8 @@ void Camera::MouseButtonCallback(GLFWwindow *window, int button, int action, int
             double xpos, ypos;
             glfwGetCursorPos(window, &xpos, &ypos);
             requestPicking((int)xpos, (int)ypos);
-            std::cout << "Left Mouse Press: Picking requested (ImGui did not capture mouse)" << std::endl;
         } else if (action == GLFW_RELEASE) {
             camera->LeftMouseDown = false;
-            std::cout << "Left Mouse Release" << std::endl;
         }
     }
     // Handle Right Mouse Button for Camera (Example: Orbit/Pan start)
@@ -230,14 +249,11 @@ void Camera::CursorPosCallback(GLFWwindow *window, double xpos, double ypos) {
     Camera* camera = static_cast<Camera*>(glfwGetWindowUserPointer(window)); if (!camera) return;
     ImGuiIO& io = ImGui::GetIO();
 
-    // Check AFTER ImGui processed AND check Gizmo state
-    // *** THIS CONDITION IS ESSENTIAL ***
-    bool gizmoConsumingMouse = useGizmo && (ImGuizmo::IsUsing() || ImGuizmo::IsOver());
-    if (io.WantCaptureMouse || gizmoConsumingMouse) {
-        camera->firstMouse = true; // Reset delta calculation on interrupt
-        return; // <<<--- MUST return here to prevent camera movement stealing input
+   // Corrected check
+    if (io.WantCaptureMouse) {
+        camera->firstMouse = true;
+        return;
     }
-    // *** END ESSENTIAL CHECK ***
 
     // --- Camera movement logic (Orbit/Pan) ---
     // Only runs if ImGui AND the gizmo did NOT capture the mouse
@@ -260,3 +276,4 @@ void Camera::ScrollCallback(GLFWwindow *window, double xoffset, double yoffset) 
     Camera* camera = static_cast<Camera*>(glfwGetWindowUserPointer(window)); if (!camera) return;
     camera->ProcessZoom(yoffset);
 }
+

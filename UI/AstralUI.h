@@ -42,7 +42,7 @@ public:
     // Render all ImGui windows
     void render();
     // Create all the UI windows and update the render parameters
-    void createUI(float& fovRef, double gpuTimeMs, size_t ramBytes,
+    void createUI(float& fovRef, size_t ramBytes,
                     std::vector<SDFObject>& objects, int& currentSelectedId,
                     int& nextSdfId, bool& useGizmoRef);
 
@@ -55,7 +55,7 @@ private:
     // Initialize ImGui context and style
     void init();
 
-    void renderMainPanel(float& fovRef, double gpuTimeMs, size_t ramBytes,
+    void renderMainPanel(float& fovRef, size_t ramBytes,
                             std::vector<SDFObject>& objects, int& currentSelectedId,
                             int& nextSdfId, bool& useGizmoRef);
 

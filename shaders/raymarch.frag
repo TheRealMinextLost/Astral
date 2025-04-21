@@ -21,7 +21,7 @@ uniform vec3 u_clearColor;          // Background color
 uniform int u_debugMode;
 
 // Ray Marching Parameters
-const int MAX_STEPS = 200;
+const int MAX_STEPS = 500;
 const float MAX_DIST = 100.0;
 const float HIT_THRESHOLD = 0.001;
 
