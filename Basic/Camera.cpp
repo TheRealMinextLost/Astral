@@ -12,7 +12,6 @@
 #include "vector"
 #include "GLFW/glfw3.h"
 #include <glm/gtx/quaternion.hpp> // Include quaternion helpers like lookAt, angleAxis
-#include <glm/gtc/constants.hpp> // <<< ADD THIS INCLUDE
 
 
 
@@ -30,19 +29,21 @@ Camera::Camera(vec3 position, vec3 target, vec3 worldUp, float fov)
     Distance = distance(position, target);
     if (Distance < 1e-5f) {
         Distance = 5.0f; // Default distance if too close
-        position = target + vec3(0.0f, 0.0f, Distance);
+        position = target + vec3(0.0f, -Distance, 0.0f);
     }
     Position = position;
 
     // Calculate intial orientation quaternion
-    vec3 initialDirection = normalize(Position - Target);
-    Orientation = quatLookAt(-initialDirection,WorldUp); // Look from position toward target
+    vec3 lookDirection = normalize(Target - Position);
+    Orientation = quatLookAt(lookDirection,WorldUp); // Look from position toward target
 
     firstMouse = true;
     LeftMouseDown = false;
     RightMouseDown = false;
     IsOrbiting = false;
     IsPanning = false;
+
+    UpdatePositionFromOrientation();
 }
 
 void Camera::UpdatePositionFromOrientation() {

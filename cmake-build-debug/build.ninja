@@ -183,6 +183,13 @@ build CMakeFiles/Astral.dir/Basic/Camera.cpp.obj: CXX_COMPILER__Astral_unscanned
   OBJECT_DIR = CMakeFiles\Astral.dir
   OBJECT_FILE_DIR = CMakeFiles\Astral.dir\Basic
 
+build CMakeFiles/Astral.dir/Basic/TransformManager.cpp.obj: CXX_COMPILER__Astral_unscanned_Debug D$:/Projects/Astral/Basic/TransformManager.cpp || cmake_object_order_depends_target_Astral
+  DEP_FILE = CMakeFiles\Astral.dir\Basic\TransformManager.cpp.obj.d
+  FLAGS = -g -std=gnu++20 -fdiagnostics-color=always
+  INCLUDES = -ID:/Projects/Astral -ID:/Projects/Astral/cmake-build-debug/_deps/imgui-src -ID:/Projects/Astral/cmake-build-debug/_deps/imgui-src/backends -ID:/Projects/Astral/cmake-build-debug/_deps/glm-src -ID:/Projects/Astral/external/glad/include -ID:/Projects/Astral/cmake-build-debug/_deps/glfw-src/include
+  OBJECT_DIR = CMakeFiles\Astral.dir
+  OBJECT_FILE_DIR = CMakeFiles\Astral.dir\Basic
+
 
 # =============================================================================
 # Link build statements for EXECUTABLE target Astral
@@ -191,7 +198,7 @@ build CMakeFiles/Astral.dir/Basic/Camera.cpp.obj: CXX_COMPILER__Astral_unscanned
 #############################################
 # Link the executable Astral.exe
 
-build Astral.exe: CXX_EXECUTABLE_LINKER__Astral_Debug CMakeFiles/Astral.dir/main.cpp.obj CMakeFiles/Astral.dir/UI/AstralUI.cpp.obj CMakeFiles/Astral.dir/utilities/utility.cpp.obj CMakeFiles/Astral.dir/Basic/Camera.cpp.obj | _deps/glfw-build/src/libglfw3.a _deps/glm-build/glm/libglm.a libglad.a libimgui.a _deps/glfw-build/src/libglfw3.a || _deps/glfw-build/src/libglfw3.a _deps/glm-build/glm/libglm.a libglad.a libimgui.a
+build Astral.exe: CXX_EXECUTABLE_LINKER__Astral_Debug CMakeFiles/Astral.dir/main.cpp.obj CMakeFiles/Astral.dir/UI/AstralUI.cpp.obj CMakeFiles/Astral.dir/utilities/utility.cpp.obj CMakeFiles/Astral.dir/Basic/Camera.cpp.obj CMakeFiles/Astral.dir/Basic/TransformManager.cpp.obj | _deps/glfw-build/src/libglfw3.a _deps/glm-build/glm/libglm.a libglad.a libimgui.a _deps/glfw-build/src/libglfw3.a || _deps/glfw-build/src/libglfw3.a _deps/glm-build/glm/libglm.a libglad.a libimgui.a
   FLAGS = -g
   LINK_FLAGS = -static
   LINK_LIBRARIES = -lopengl32  _deps/glfw-build/src/libglfw3.a  _deps/glm-build/glm/libglm.a  libglad.a  libimgui.a  _deps/glfw-build/src/libglfw3.a  -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32

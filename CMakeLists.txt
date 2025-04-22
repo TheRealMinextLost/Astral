@@ -80,6 +80,8 @@ add_executable(Astral
         Basic/Camera.cpp
         Basic/Camera.h
         Basic/SDFObject.h
+        Basic/TransformManager.cpp
+        Basic/TransformManager.h
 )
 
 # Optionally specify runtime output directory

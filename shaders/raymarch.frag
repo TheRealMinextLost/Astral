@@ -169,7 +169,7 @@ vec3 getRayDir(vec2 screenPos, float fov){
 
 // -- Simple Lambertian Diffuse lighting + Selection Highlight --
 vec3 applyLighting(vec3 hitPos, vec3 normal, vec3 baseColor, bool isSelected) {
-    vec3 lightDir = normalize(vec3(0.8, 1.0, -0.5));
+    vec3 lightDir = normalize(vec3(0.8, -1.0, 0.5));
     float diffuse = max(0.0, dot(normal, lightDir));
     vec3 ambient = vec3(0.1) * baseColor;
 
@@ -278,5 +278,3 @@ void main()
     // Gamma correction (simple version)
     // FragColor = vec4(pow(color, vec3(1.0/2.2)), 1.0);
 }
-
-
