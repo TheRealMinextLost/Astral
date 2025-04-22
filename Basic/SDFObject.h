@@ -9,7 +9,7 @@
 #include <vector>
 
 enum class SDFType : int {
-    SPHERE = 0,
+    SPHERE = 0, // Sphere and ellipsoids now
     BOX = 1
     // Other SDF here (make them be added dynamically)
 };
@@ -21,13 +21,9 @@ struct SDFObject {
 
     glm::vec3 position = glm::vec3(0.0f);
     glm::vec3 rotation = glm::vec3(0.0f); // Euler angles for simplicity
-    glm::vec3 scale = glm::vec3(1.0f);
 
     glm::vec3 color = glm::vec3(1.0f);
-
-    // Type-specific parameters
-    float radius = 0.5f;             // For SPHERE
-    glm::vec3 halfSize = glm::vec3(0.5f); // For BOX
+    glm::vec3 parameters = glm::vec3(0.5f); // Default size or half-size
 
     // Helper functions
     glm::mat4 getModelMatrix() const {
@@ -36,7 +32,6 @@ struct SDFObject {
         model = rotate(model, glm::radians(rotation.z), glm::vec3(0.0f, 0.0f, 1.0f)); // Z
         model = rotate(model, glm::radians(rotation.y), glm::vec3(0.0f, 1.0f, 0.0f)); // Y
         model = rotate(model, glm::radians(rotation.x), glm::vec3(1.0f, 0.0f, 0.0f)); // X
-        model = glm::scale(model, scale);
         return model;
     }
 
@@ -46,23 +41,24 @@ struct SDFObject {
 
     // Constructor
     SDFObject(int uniqueId, SDFType t = SDFType::SPHERE) : id(uniqueId), type(t) {
-        // Generate default name based on type and ID
-        std::string typeName = (type == SDFType::BOX) ? "box" : "sphere";
+        std::string typeName = (type == SDFType::BOX) ? "box" : "sphere"; // Generate the default name based on type and ID
         name = typeName + "_" +std::to_string(uniqueId);
+        if (type == SDFType::SPHERE) {
+            parameters = glm::vec3(0.5f);
+        } else {
+            parameters = glm::vec3(0.5f);
         }
+    }
 
     SDFObject() : id(-1) {};
+
 };
 
-// --- ADD THIS GPU DATA STRUCT ---
-// Structure matching std140 layout for the UBO
-// MUST MATCH THE GLSL STRUCT DEFINITION!
+
 struct SDFObjectGPUData {
     glm::mat4 inverseModelMatrix; // 64 bytes (4x vec4)
     glm::vec4 color;              // 16 bytes (vec4)
-    glm::vec4 params1_3_type;     // 16 bytes (radius/halfX, halfY, halfZ, type)
-    // Total size should be multiple of 16 bytes (std140 base alignment for vec4/mat4)
-    // This struct is 96 bytes, which is okay.
+    glm::vec4 paramsXYZ_type;     // 16 bytes (radius/halfX, halfY, halfZ, type)
 };
 // --- END ADDITION ---
 

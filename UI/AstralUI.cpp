@@ -268,7 +268,6 @@ void AstralUI::renderMainPanel(float& fovRef, size_t ramBytes,
             Text("Transform");
             DragFloat3("Position", value_ptr(selectedObjPtr->position), 0.1f);
             DragFloat3("Rotation", value_ptr(selectedObjPtr->rotation), 1.0f);
-            DragFloat3("Scale", value_ptr(selectedObjPtr->scale), 0.05f);
             Separator();
 
             // Edit Color
@@ -279,9 +278,9 @@ void AstralUI::renderMainPanel(float& fovRef, size_t ramBytes,
             // Edit Type-Specific Parameters
             Text("Parameters");
             if (selectedObjPtr->type == SDFType::SPHERE) {
-                DragFloat("Radius", &selectedObjPtr->radius, 0.1f, 0.01f, 100.0f);
+                DragFloat3("radius (X/Y/Z)", value_ptr(selectedObjPtr->parameters), 0.01f, 0.001f, 100.0f);
             } else if (selectedObjPtr->type == SDFType::BOX) {
-                DragFloat3("Half Size", value_ptr(selectedObjPtr->halfSize), 0.01f, 0.01f, 100.0f);
+                DragFloat3("Half Size", value_ptr(selectedObjPtr->parameters), 0.01f, 0.001f, 100.0f);
             }
 
         } else {

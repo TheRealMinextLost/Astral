@@ -223,9 +223,6 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
 void updateSDFUBOData() {
     int numObjectsToSend = std::min((int)sdfObjects.size(), MAX_SDF_OBJECTS);
     if (numObjectsToSend <= 0) {
-        // Optionally clear the UBO if needed, or just return
-        // You might still need to bind and upload zero data if the shader expects something
-        // For now, just return if empty.
         return;
     }
 
@@ -236,13 +233,7 @@ void updateSDFUBOData() {
         gpuData[i].inverseModelMatrix = obj.getInverseModelMatrix();
         gpuData[i].color = glm::vec4(obj.color, 1.0f);
 
-        if (obj.type == SDFType::SPHERE) {
-            gpuData[i].params1_3_type = glm::vec4(obj.radius, 0.0f, 0.0f, static_cast<float>(obj.type));
-        } else if (obj.type == SDFType::BOX) {
-            gpuData[i].params1_3_type = glm::vec4(obj.halfSize.x, obj.halfSize.y, obj.halfSize.z, static_cast<float>(obj.type));
-        } else {
-            gpuData[i].params1_3_type = glm::vec4(0.0f, 0.0f, 0.0f, static_cast<float>(obj.type));
-        }
+        gpuData[i].paramsXYZ_type = glm::vec4(obj.parameters.x, obj.parameters.y, obj.parameters.z, static_cast<float>(obj.type));
     }
 
     glBindBuffer(GL_UNIFORM_BUFFER, sdfDataUBO);
@@ -417,8 +408,19 @@ int main() {
 
     // --- Initialize SDF Objects ---
     cout << "Initializing SDF Objects..." << endl;
-    SDFObject sphere1(nextSdfId++); sphere1.type = SDFType::SPHERE; sphere1.position = vec3(-1.5f, 0.0f, 0.0f); sphere1.radius = 0.8f; sphere1.color = vec3(1.0f, 1.0f, 1.0f); sdfObjects.push_back(sphere1);
-    SDFObject box1(nextSdfId++); box1.type = SDFType::BOX; box1.position = vec3(1.5f, 0.0f, 0.0f); box1.halfSize = vec3(0.6f, 0.7f, 0.8f); box1.color = vec3(1.0f, 1.0f, 1.0f); sdfObjects.push_back(box1);
+    SDFObject sphere1(nextSdfId++);
+    sphere1.type = SDFType::SPHERE;
+    sphere1.position = vec3(-1.5f, 0.0f, 0.0f);
+    sphere1.parameters = vec3(0.8f); // Set all radii to 0.8 for a uniform sphere
+    sphere1.color = vec3(1.0f, 1.0f, 1.0f);
+    sdfObjects.push_back(sphere1);
+
+    SDFObject box1(nextSdfId++);
+    box1.type = SDFType::BOX;
+    box1.position = vec3(1.5f, 0.0f, 0.0f);
+    box1.parameters = vec3(0.6f, 0.7f, 0.8f); // Set half-sizes directly
+    box1.color = vec3(1.0f, 1.0f, 1.0f);
+    sdfObjects.push_back(box1);
 
 
     /*// --- Gizmo State ---

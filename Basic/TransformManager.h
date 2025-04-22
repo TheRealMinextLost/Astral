@@ -48,8 +48,8 @@ private:
     // Initial state for cancellation/delta calculation
     glm::vec3 initialPosition;
     glm::vec3 initialRotation;
-    glm::vec3 initialScale;
     glm::quat initialOrientation;
+    glm::vec3 initialParameters;
 
     // Mouse tracking for modal ops
     double modalStartX = 0.0, modalStartY = 0.0;

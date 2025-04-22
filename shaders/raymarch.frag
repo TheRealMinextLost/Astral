@@ -25,15 +25,20 @@ const int MAX_STEPS = 500;
 const float MAX_DIST = 100.0;
 const float HIT_THRESHOLD = 0.001;
 
-// --- SDF Function (Sphere) ---
-float sdSphereLocal(vec3 p, float radius) {
-    return length(p) - radius;
-}
 
+// -- SDF FUNCTIONS --
 float sdBoxLocal(vec3 p, vec3 b) {
     // Assumes p is already in local space, centered at origin
     vec3 q = abs(p) -b ;
     return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+}
+
+float sdEllipsoidLocal(vec3 p, vec3 r) {
+    r = max(r,vec3(1e-6));
+    float k0 = length(p / r);
+    float k1 = length(p / (r *r));
+    if (k1 < 1e-7) return length(p) - length(r);
+    return k0 * (k0 - 1.0) / k1;
 }
 
 // Smooth Minimum function
@@ -56,7 +61,7 @@ struct SDFResult {
 struct SDFObjectGPUData {
     mat4 inverseModelMatrix;
     vec4 color;
-    vec4 params1_3_type;
+    vec4 paramsXYZ_type;
 };
 
 // --- MODIFIED UBO DEFINITION ---
@@ -72,71 +77,45 @@ SDFResult mapTheWorld(vec3 p) {
 
     // --- Initialize with the *first* object's data ---
     SDFResult res; // Use the result struct to hold intermediate values
-    mat4 invTransform0 = sdfBlockInstance.objects[0].inverseModelMatrix;
-    vec3 objColor0 = sdfBlockInstance.objects[0].color.rgb;
-    float param1_0 = sdfBlockInstance.objects[0].params1_3_type.x;
-    float param2_0 = sdfBlockInstance.objects[0].params1_3_type.y;
-    float param3_0 = sdfBlockInstance.objects[0].params1_3_type.z;
-    int objType0 = int(sdfBlockInstance.objects[0].params1_3_type.w);
-
-    vec4 pLocal4_0 = invTransform0 * vec4(p, 1.0);
-    vec3 pLocal0 = pLocal4_0.xyz / pLocal4_0.w;
-    vec3 invScaleApprox0 = vec3(length(invTransform0[0].xyz), length(invTransform0[1].xyz), length(invTransform0[2].xyz));
-    float avgInvScale0 = length(invScaleApprox0) / sqrt(3.0) + 1e-6;
-    float approxFwdScale0 = (avgInvScale0 > 1e-5) ? (1.0 / avgInvScale0) : 1.0;
-
-    float localDist0 = MAX_DIST;
-    if (objType0 == 0) { localDist0 = sdSphereLocal(pLocal0, param1_0); }
-    else if (objType0 == 1) { localDist0 = sdBoxLocal(pLocal0, vec3(param1_0, param2_0, param3_0)); }
-
-    res.dist = localDist0 * approxFwdScale0;
-    res.color = objColor0;
-    res.objectId = 0; // Initially closest
+    res.dist = MAX_DIST;
+    res.color = u_clearColor;
+    res.objectId = - 1;
 
     float k = u_blendSmoothness; // Get blend factor from uniform
 
     // --- Loop through the *rest* of the objects (start from i = 1) ---
-    for (int i = 1; i < u_sdfCount; ++i) {
+    for (int i = 0; i < u_sdfCount; ++i) {
         // Get data for object 'i'
-        mat4 invTransform_i = sdfBlockInstance.objects[i].inverseModelMatrix;
+        mat4 invTransform_i = sdfBlockInstance.objects[i].inverseModelMatrix; // no scale here
         vec3 objColor_i = sdfBlockInstance.objects[i].color.rgb;
-        float param1_i = sdfBlockInstance.objects[i].params1_3_type.x;
-        float param2_i = sdfBlockInstance.objects[i].params1_3_type.y;
-        float param3_i = sdfBlockInstance.objects[i].params1_3_type.z;
-        int objType_i = int(sdfBlockInstance.objects[i].params1_3_type.w);
+        vec3 params_i = sdfBlockInstance.objects[i].paramsXYZ_type.xyz;
+        int objType_i = int(sdfBlockInstance.objects[i].paramsXYZ_type.w);
 
         // Calculate distance to object 'i'
         vec4 pLocal4_i = invTransform_i * vec4(p, 1.0);
         vec3 pLocal_i = pLocal4_i.xyz / pLocal4_i.w;
-        vec3 invScaleApprox_i = vec3(length(invTransform_i[0].xyz), length(invTransform_i[1].xyz), length(invTransform_i[2].xyz));
-        float avgInvScale_i = length(invScaleApprox_i) / sqrt(3.0) + 1e-6;
-        float approxFwdScale_i = (avgInvScale_i > 1e-5) ? (1.0 / avgInvScale_i) : 1.0;
 
-        float localDist_i = MAX_DIST;
-        if (objType_i == 0) { localDist_i = sdSphereLocal(pLocal_i, param1_i); }
-        else if (objType_i == 1) { localDist_i = sdBoxLocal(pLocal_i, vec3(param1_i, param2_i, param3_i)); }
-        float currentObjDist = localDist_i * approxFwdScale_i;
-
-        // *** BLENDING LOGIC ***
-        // Calculate smin distance AND blend factor 'h' between
-        // the current accumulated result (res.dist, res.color) and the new object (currentObjDist, objColor_i)
-        vec2 blend_result = sminVerbose(res.dist, currentObjDist, k); // Use the verbose version
-
-        // Update the distance
-        res.dist = blend_result.x;
-
-        // Update the color by mixing using the blend factor 'h'
-        // mix(x, y, a): result = x*(1-a) + y*a
-        // h=0 means distA was smaller -> use res.color
-        // h=1 means distB (currentObjDist) was smaller -> use objColor_i
-        res.color = mix(res.color, objColor_i, blend_result.y);
-
-        // Update closest object ID based on blend factor (optional, only if needed for other logic)
-        // If h > 0.5, object 'i' has more influence on the final distance/shape.
-        if (blend_result.y > 0.5) { // Threshold determines which ID "wins" in blend region
-            res.objectId = i;
+        float currentObjDist = MAX_DIST;
+        if (objType_i == 0) {
+            currentObjDist = sdEllipsoidLocal(pLocal_i, params_i);
         }
-        // *** END BLENDING LOGIC ***
+        else if (objType_i == 1) {
+            currentObjDist = sdBoxLocal(pLocal_i, params_i);
+        }
+
+        // Combine with previos result if i > 0
+        if (i == 0) {
+            res.dist= currentObjDist;
+            res.color = objColor_i;
+            res.objectId = i;
+        } else {
+            vec2 blend_result = sminVerbose(res.dist, currentObjDist, k);
+            res.dist = blend_result.x;
+            res.color = mix(res.color, objColor_i, blend_result.y);
+            if (blend_result.y > 0.5) {
+                res.objectId = i;
+            }
+        }
     }
 
     // Final check for selection highlight using the determined closestObjectId
@@ -145,13 +124,18 @@ SDFResult mapTheWorld(vec3 p) {
 }
 
 // -- Calculate Normal --
-vec3 calcNormal(vec3 p) {
-    vec2 e = vec2(HIT_THRESHOLD * 0.5, 0.0);
-    return normalize(vec3(
-    mapTheWorld(p + e.xyy).dist - mapTheWorld(p - e.xyy).dist,
-    mapTheWorld(p + e.yxy).dist - mapTheWorld(p - e.yxy).dist,
-    mapTheWorld(p + e.yyx).dist - mapTheWorld(p - e.yyx).dist
-    ));
+vec3 calcNormal(vec3 p, float t) {
+
+    float epsilon = max(t * 0.0005, HIT_THRESHOLD * 0.1); // Don't let epsilon become too small
+
+    vec2 e = vec2(epsilon, 0.0);
+
+    // Use the distance from mapTheWorld directly, which includes the scale factor.
+    float dx = mapTheWorld(p + e.xyy).dist - mapTheWorld(p - e.xyy).dist;
+    float dy = mapTheWorld(p + e.yxy).dist - mapTheWorld(p - e.yxy).dist;
+    float dz = mapTheWorld(p + e.yyx).dist - mapTheWorld(p - e.yyx).dist;
+
+    return normalize(vec3(dx, dy, dz));
 }
 
 // -- Calcualte Ray Direction --
@@ -197,19 +181,15 @@ struct RayMarchResult {
 // -- Ray Marching Function --
 RayMarchResult rayMarch(vec3 ro, vec3 rd){
     float totalDist = 0.0;
-    for (int i =0; i < MAX_STEPS; i++){
+    for (int i = 0; i < MAX_STEPS; i++){
         vec3 p = ro + rd * totalDist;
         SDFResult scene = mapTheWorld(p); // Get distance and color
 
         if (scene.dist < HIT_THRESHOLD){
             // Hit! Calculate Lighting
-            vec3 normal = calcNormal(p);
+            vec3 normal = calcNormal(p, totalDist);
 
-            vec3 litColor = applyLighting(p, normal, scene.color, scene.isSelected);
-
-            // Fog effect (optional)
-            //float fogAmount = 1.0 - exp(-totalDist * 0.05);
-            //litcolor = mix(lit);
+           vec3 litColor = applyLighting(p, normal, scene.color, scene.isSelected);
             return RayMarchResult(litColor, i + 1, true, totalDist, scene.objectId, scene.isSelected);
         }
 
@@ -217,8 +197,8 @@ RayMarchResult rayMarch(vec3 ro, vec3 rd){
             break;
         }
 
-        // Advance ray by the disance to nearest object
-        totalDist += max(HIT_THRESHOLD * 0.1, scene.dist);
+        float stepDist = max(HIT_THRESHOLD * 0.1, scene.dist * 0.90);
+        totalDist += stepDist;
     }
     // Missed
     return RayMarchResult(u_clearColor, MAX_STEPS, false, totalDist, -1, false);
@@ -247,7 +227,7 @@ void main()
         if (result.hit){
             // Recalculate normal at the approximate hit position
             vec3 hitPos = ro + rd * result.finalDist;
-            vec3 normal = calcNormal(hitPos);
+            vec3 normal = calcNormal(hitPos,result.finalDist);
             finalColor = normal * 0.5 + 0.5; // Map normal range [-1,1] to [0,1] for color
         } else {
             finalColor = vec3(0.0);
