@@ -6,9 +6,13 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp> // Include quaternion header
 
+class TransformManager;
+
+
 struct ImGuiIO;
 
 struct GLFWwindow;
+
 
 class Camera {
 public:
@@ -29,6 +33,10 @@ public:
     float OrbitSensitivity = 0.005f;
     float PanSensitivity = 0.001f;
     float ZoomSensitivity = 0.5f;
+
+    TransformManager* transformManagerPtr = nullptr; // Pointer to the TransformManager
+
+
 
     // Input state
     bool LeftMouseDown = false;
@@ -63,6 +71,8 @@ public:
     void ProcessPan(double xoffset, double yoffset);
     void ProcessZoom(double yoffset);
     void ProcessKeyboardMovement(GLFWwindow* window, float deltaTime);
+
+    void SetTransformManager(TransformManager* tm) { transformManagerPtr = tm; }
 
     // Static callback functions
     static void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods);

@@ -6,21 +6,20 @@
 #include "Camera.h"
 #include <iostream> // For debugging
 #include <imgui_impl_glfw.h>
-#include "Basic/SDFObject.h"
-#include "utilities/utility.h"
 #include <imgui.h>
-#include "vector"
+#include <vector>
 #include "GLFW/glfw3.h"
 #include <glm/gtx/quaternion.hpp> // Include quaternion helpers like lookAt, angleAxis
+#include "TransformManager.h"
 
 
 
 
-// External global referenced by callbacks
-extern std::vector<SDFObject> sdfObjects;
-extern int selectedObjectId;
-extern bool useGizmo;
-extern void requestPicking(int mouseX, int mouseY);
+// --- Access global variables defined in main.cpp ---
+// These 'extern' declarations tell Camera.cpp that these variables exist elsewhere (in main.cpp)
+extern bool pickRequested;
+extern int pickMouseX;
+extern int pickMouseY;
 
 using namespace glm;
 
@@ -66,9 +65,9 @@ glm::mat4 Camera::GetProjectionMatrix(float aspectRatio, float nearPlane, float 
 // Inside Camera.cpp
 void Camera::GetBasisVectors(vec3 &outRight, vec3 &outUp, vec3 &outForward) const {
     // Derive basis vectors directly from the orientation quaternion
-    outRight = Orientation * vec3(0.0f, 0.0f, -1.0f); // Camera looks down -Z
-    outUp = Orientation * vec3(0.0f, 1.0f, 0.0f);       // Camera local up is +Y
-    outRight = Orientation * vec3(1.0f, 0.0f, 0.0f);    // Camera local right is +X
+    outForward = normalize(Orientation * vec3(0.0f, 0.0f, -1.0f));
+    outUp = normalize(Orientation * vec3(0.0f, 1.0f, 0.0f));
+    outRight = normalize(Orientation * vec3(1.0f, 0.0f, 0.0f));
 }
 
 mat3 Camera::GetBasisMatrix() const {
@@ -201,7 +200,7 @@ void Camera::MouseButtonCallback(GLFWwindow *window, int button, int action, int
     Camera* camera = static_cast<Camera*>(glfwGetWindowUserPointer(window));
     if (!camera) return;
 
-    // Reset first Mouse flag for camera movement delta calculation on any press
+    // Reset the first Mouse flag for camera movement delta calculation on any press
     if (action == GLFW_PRESS) {
         camera->firstMouse = true;
     }
@@ -210,11 +209,19 @@ void Camera::MouseButtonCallback(GLFWwindow *window, int button, int action, int
     if (button == GLFW_MOUSE_BUTTON_LEFT) {
         if (action == GLFW_PRESS) {
             camera->LeftMouseDown = true;
-            // ALWAYS request picking if ImGui didn't capture the mouse.
-            // Selection state (useGizmo=true) will be set by handlePickingRequest.
-            double xpos, ypos;
-            glfwGetCursorPos(window, &xpos, &ypos);
-            requestPicking((int)xpos, (int)ypos);
+
+            if (camera->transformManagerPtr && !camera->transformManagerPtr->isModalActive())
+            {
+                double xpos, ypos;
+                glfwGetCursorPos(window, &xpos, &ypos);
+                pickRequested = true; // Set the global flag
+                pickMouseX = static_cast<int>(xpos);
+                pickMouseY = static_cast<int>(ypos);
+                std::cout << "Pick requested at: " << pickMouseX << ", " << pickMouseY << std::endl; // Debug output
+            } else {
+                std::cout << "Pick deferred - TransformManager is active or pointer is null." << std::endl; // Debug output
+            }
+
         } else if (action == GLFW_RELEASE) {
             camera->LeftMouseDown = false;
         }

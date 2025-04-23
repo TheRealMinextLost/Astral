@@ -19,13 +19,16 @@
 #include "Basic/SDFObject.h"
 #include "Basic/TransformManager.h"
 
+bool pickRequested = false;
+int pickMouseX = 0;
+int pickMouseY = 0;
+
 using namespace glm;
 using namespace std;
 
 // -- Shader file paths --
 const string VERTEX_SHADER_PATH = "shaders/raymarch.vert";
 const string FRAGMENT_SHADER_PATH = "shaders/raymarch.frag";
-const string PICKING_SHADER_PATH = "shaders/picking.frag";
 
 // Window dimensions
 unsigned int SCR_WIDTH = 1920;
@@ -39,10 +42,11 @@ const int UBO_BINDING_POINT = 0;
 unsigned int quadVAO = 0;
 unsigned int quadVBO = 0;
 GLuint shaderProgram = 0;
-GLuint pickingShaderProgram = 0;
 GLuint sdfDataUBO = 0;
-GLuint pickingFBO = 0;
+GLuint renderFBO = 0;
+GLuint colorTexture = 0;
 GLuint pickingTexture = 0;
+GLuint depthRenderbuffer = 0;
 
 // Global App State
 Camera camera(vec3(0.0f, -5.0f, 1.0f));
@@ -50,15 +54,7 @@ vector<SDFObject> sdfObjects;
 int nextSdfId = 0;
 int selectedObjectId = -1;
 bool useGizmo = false;
-TransformManager* g_transformManagerPtr = nullptr; // Global pointer
 
-
-
-// Picking State
-std::map<std::string, GLint> pickingUniformLocs; // Cache for non-UBO picking uniforms
-bool pickRequested = false;
-int pickMouseX = 0;
-int pickMouseY = 0;
 
 // Helper function to check and print OpenGL errors
 GLenum glCheckError_(const char *file, int line) {
@@ -69,42 +65,16 @@ GLenum glCheckError_(const char *file, int line) {
             case GL_INVALID_ENUM:                  error = "INVALID_ENUM"; break;
             case GL_INVALID_VALUE:                 error = "INVALID_VALUE"; break;
             case GL_INVALID_OPERATION:             error = "INVALID_OPERATION"; break;
-            case GL_STACK_OVERFLOW:                error = "STACK_OVERFLOW"; break;
-            case GL_STACK_UNDERFLOW:               error = "STACK_UNDERFLOW"; break;
             case GL_OUT_OF_MEMORY:                 error = "OUT_OF_MEMORY"; break;
             case GL_INVALID_FRAMEBUFFER_OPERATION: error = "INVALID_FRAMEBUFFER_OPERATION"; break;
-            default:                               error = "UNKNOWN_ERROR (" + std::to_string(errorCode) + ")"; break;
+            default:                               error = "Unknown (" + std::to_string(errorCode) + ")"; break;
         }
-        std::cerr << "OpenGL Error (" << error << ") | In File: " << file << " (Line: " << line << ")" << std::endl;
+        std::cerr << "OpenGL Error (" << error << ") " << file << ":" << line << std::endl;
     }
-    return errorCode; // Return the last code found (or GL_NO_ERROR)
+    return errorCode;
 }
 #define glCheckError() glCheckError_(__FILE__, __LINE__)
 
-// Helper to find the selected object (you might already have this)
-SDFObject* findSelectedObject(int id) {
-    if (id == -1) return nullptr;
-    for (auto& obj : sdfObjects) {
-        if (obj.id == id) {
-            return &obj;
-        }
-    }
-    return nullptr;
-}
-
-// --- FBO Setup ---
-void setupPickingFBO(int width, int height) {
-    if (pickingFBO) { glDeleteFramebuffers(1, &pickingFBO); glDeleteTextures(1, &pickingTexture); pickingFBO = 0; pickingTexture = 0; }
-    if (width <= 0 || height <= 0) return;
-    glGenFramebuffers(1, &pickingFBO); glBindFramebuffer(GL_FRAMEBUFFER, pickingFBO);
-    glGenTextures(1, &pickingTexture); glBindTexture(GL_TEXTURE_2D, pickingTexture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32I, width, height, 0, GL_RED_INTEGER, GL_INT, NULL);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, pickingTexture, 0);
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) { cerr << "ERROR::FRAMEBUFFER:: Picking FBO is not complete" << endl; }
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-     // Check after setup
-}
 
 // --- Shader Compile ---
 GLuint compileShader(GLenum type, const std::string& source) {
@@ -127,7 +97,7 @@ GLuint linkProgram(GLuint vertexShader, GLuint fragmentShader) {
     GLuint program = glCreateProgram();
     glAttachShader(program, vertexShader);
     glAttachShader(program, fragmentShader);
-    glLinkProgram(program);  // Check right after link
+    glLinkProgram(program);  // Check right after a link
 
     GLint success; GLchar infoLog[1024];
     glGetProgramiv(program, GL_LINK_STATUS, &success);
@@ -137,86 +107,139 @@ GLuint linkProgram(GLuint vertexShader, GLuint fragmentShader) {
         glDeleteProgram(program); return 0;
     } else if (strlen(infoLog) > 0) { cout << "Program (ID: " << program << ") Link Log (Success with messages):\n" << infoLog << endl; }
 
-    // Detach shaders immediately after successful link
+    // Detach shaders immediately after a successful link
     glDetachShader(program, vertexShader);
     glDetachShader(program, fragmentShader);
 
     return program;
 }
 
-// --- Picking ---
-void requestPicking(int mouseX, int mouseY) {
-    ImGuiIO& io = ImGui::GetIO();
-    if (g_transformManagerPtr && !io.WantCaptureMouse && !g_transformManagerPtr->isModalActive()) {
-        pickRequested = true;
-        pickMouseX = mouseX;
-        pickMouseY = mouseY;
-    } else {
-        if (g_transformManagerPtr->isModalActive()) {
-            std::cout << "Picking request ignored (modal mode active)" << std::endl;
-
-        }
-        //
+void setupRenderFBO(int width, int height) {
+    // Cleanup existing FBO resources
+    if (renderFBO) {
+        glDeleteFramebuffers(1, &renderFBO);
+        glDeleteTextures(1, &colorTexture);
+        glDeleteTextures(1, &pickingTexture);
+        if (depthRenderbuffer) glDeleteRenderbuffers(1, &depthRenderbuffer);
+        renderFBO = 0; colorTexture = 0; pickingTexture = 0; depthRenderbuffer = 0;
     }
-}
 
-void handlePickingRequest(int windowWidth, int windowHeight) {
-    if (!pickRequested || windowWidth <= 0 || windowHeight <= 0) { return; }
-    pickRequested = false;
+    glCheckError();
 
-    if (!pickingFBO || !pickingShaderProgram) { cerr << "Picking system not initialized!" << std::endl; return; }
+    if (width <= 0 || height <= 0) {
+        std::cerr << "Warning: Invalid dimensions for FBO setup (" << width << "x" << height << ")" << std::endl;
+        return;
+    }
 
-    // Bind Picking FBO & Set Viewport
-    glBindFramebuffer(GL_FRAMEBUFFER, pickingFBO);
-    glViewport(0, 0, windowWidth, windowHeight);
+    glGenFramebuffers(1, &renderFBO);
+    glBindFramebuffer(GL_FRAMEBUFFER, renderFBO);
 
-    // Clear Texture
-    GLint clearValue = -1; glClearBufferiv(GL_COLOR, 0, &clearValue);
+    // 1. Color Texture
+    glGenTextures(1, &colorTexture);
+    glBindTexture(GL_TEXTURE_2D, colorTexture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorTexture, 0);
+    std::cout << "Color Texture created (ID: " << colorTexture << ")" << std::endl;
+    glCheckError();
 
-    // Use Picking Shader & Set Non-UBO Uniforms
-    glUseProgram(pickingShaderProgram);
-    if (pickingUniformLocs.count("u_resolution")) glUniform2f(pickingUniformLocs["u_resolution"], (float)windowWidth, (float)windowHeight);
-    if (pickingUniformLocs.count("u_cameraPos")) glUniform3fv(pickingUniformLocs["u_cameraPos"], 1, value_ptr(camera.Position));
-    if (pickingUniformLocs.count("u_cameraBasis")) glUniformMatrix3fv(pickingUniformLocs["u_cameraBasis"], 1, GL_FALSE, value_ptr(camera.GetBasisMatrix()));
-    if (pickingUniformLocs.count("u_fov")) glUniform1f(pickingUniformLocs["u_fov"], camera.Fov);
-    int numObjectsToSendPick = std::min((int)sdfObjects.size(), MAX_SDF_OBJECTS);
-    if (pickingUniformLocs.count("u_sdfCount")) glUniform1i(pickingUniformLocs["u_sdfCount"], numObjectsToSendPick);
-     // Check after setting picking uniforms
+    // 2. Picking ID Texture
+    glGenTextures(1, &pickingTexture);
+    glBindTexture(GL_TEXTURE_2D, pickingTexture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32I, width, height, 0 , GL_RED_INTEGER, GL_INT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, pickingTexture, 0);
+    std::cout << "Picking ID Texture created (ID: " << pickingTexture << ")" << std::endl;
+    glCheckError();
 
-    // Draw Fullscreen Quad
-    glDisable(GL_DEPTH_TEST);
-    glBindVertexArray(quadVAO);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
-    glBindVertexArray(0);
 
-    // Read Pixel Data
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glReadBuffer(GL_COLOR_ATTACHMENT0);
-    int pickedIndex = -1;
-    int readY = windowHeight - 1 - pickMouseY;
-    if (pickMouseX >= 0 && pickMouseX < windowWidth && readY >= 0 && readY < windowHeight) {
-        glReadPixels(pickMouseX, readY, 1, 1, GL_RED_INTEGER, GL_INT, &pickedIndex);
-    } else { cerr << "Picking coordinates out of bounds!" << std::endl; }
+    // 3. Renderbuffer Depth
+    glGenRenderbuffers(1, &depthRenderbuffer);
+    glBindRenderbuffer(GL_RENDERBUFFER, depthRenderbuffer);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, width, height);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRenderbuffer);
+    std::cout << "Depth Renderbuffer created (ID: " << depthRenderbuffer << ")" << std::endl;
+    glCheckError();
+
+    // 4. Specify Draw Buffers for MRT
+    GLenum drawBuffers[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+    glDrawBuffers(2, drawBuffers);
+    glCheckError();
+
+    // 5. Check FBO completeness
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        std::cerr << "ERROR::FRAMEBUFFER:: Render FBO is not complete!" << std::endl;
+    } else {
+        std::cout << "Render FBO setup successful." << std::endl;
+    }
 
     // Unbind FBO
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glCheckError();
+}
 
-    // Process result
-    if (pickedIndex >= 0 && pickedIndex < sdfObjects.size()) {
-        selectedObjectId = sdfObjects[pickedIndex].id; useGizmo = true;
-        std::cout << "GPU Picked Object ID: " << selectedObjectId << " (Index: " << pickedIndex << ")" << std::endl;
+
+void handlePickingRequest(int windowWidth, int windowHeight) {
+    if (!pickRequested || windowWidth <= 0 || windowHeight <= 0) {
+        if (!pickRequested) return;
+        pickRequested = false;
+        return;
+    }
+    pickRequested = false;
+
+    if (!renderFBO || !pickingTexture) {
+        std::cerr << "ERROR::PICKING:: Render FBO or Picking Texture not initialized!" << std::endl;
+        selectedObjectId = -1;
+        useGizmo = false;
+        return;
+    }
+    // Bind Picking FBO & Set Viewport
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, renderFBO);
+
+    glReadBuffer(GL_COLOR_ATTACHMENT1);
+
+    int pickedIndex = -1;
+    int readY = windowHeight - 1 - pickMouseY;
+
+    if (pickMouseX >= 0 && pickMouseX < windowWidth && readY >= 0 && readY < windowHeight) {
+        glReadPixels( pickMouseX, readY, 1, 1, GL_RED_INTEGER, GL_INT, &pickedIndex);
+        glCheckError(); // Check RIGHT AFTER glReadPixels
     } else {
-        selectedObjectId = -1; useGizmo = false;
-        if (pickMouseX >= 0 && pickMouseX < windowWidth && readY >= 0 && readY < windowHeight) {
-             std::cout << "GPU Picked Background (Index: " << pickedIndex << ")" << std::endl;
+        std::cerr << "Warning::PICKING:: Coordinates out of bounds." << std::endl;
+    }
+
+    // Unbind the read framebuffer
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+
+    // --- Process the result ---
+    // ... (Processing logic remains the same) ...
+    if (pickedIndex >= 0 && pickedIndex < sdfObjects.size()) {
+        if (sdfObjects[pickedIndex].id != selectedObjectId) {
+            selectedObjectId = sdfObjects[pickedIndex].id;
+            useGizmo = true; // Or set based on the transform Manager state
+            std::cout << "Picked Object Index: " << pickedIndex << " -> ID: " << selectedObjectId << std::endl;
+        }
+    } else {
+        if (selectedObjectId != -1) {
+            selectedObjectId = -1;
+            useGizmo = false;
+            std::cout << "Picked Background (Index: " << pickedIndex << ")" << std::endl;
         }
     }
 }
 
 // --- Framebuffer Resize ---
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
-    glViewport(0, 0, width, height);
-    setupPickingFBO(width, height);
+    if (width > 0 && height > 0) {
+        glViewport(0, 0, width, height);
+        setupRenderFBO(width, height);
+    }
 }
 
 // --- UBO ---
@@ -262,18 +285,6 @@ void setupUBO() {
             cout << "  Main Shader - Bound 'SDFBlock' to binding point " << UBO_BINDING_POINT << "." << endl;
         } else { cerr << "!!!!!! Warning: Uniform block 'SDFBlock' NOT FOUND in main shader program. !!!!!!" << endl; }
     } else { cerr << "Error: Main shader program handle is invalid before UBO setup." << endl; }
-
-    // Picking Shader
-    cout << "Checking & Binding UBO for Picking Shader (Program ID: " << pickingShaderProgram << ")" << endl;
-    if (pickingShaderProgram != 0) {
-        GLuint blockIndexPicking = glGetUniformBlockIndex(pickingShaderProgram, "SDFBlock");
-        cout << "  Picking Shader - glGetUniformBlockIndex for 'SDFBlock' returned: " << blockIndexPicking << endl;
-        if (blockIndexPicking != GL_INVALID_INDEX) {
-            glUniformBlockBinding(pickingShaderProgram, blockIndexPicking, UBO_BINDING_POINT);
-            cout << "  Picking Shader - Bound 'SDFBlock' to binding point " << UBO_BINDING_POINT << "." << endl;
-        } else { cerr << "!!!!!! Warning: Uniform block 'SDFBlock' NOT FOUND in picking shader program. !!!!!!" << endl; }
-    } else { cerr << "Error: Picking shader program handle is invalid before UBO setup." << endl; }
-    cout << "Finished UBO setup." << endl;
 }
 
 // --- Main ---
@@ -304,7 +315,8 @@ int main() {
      // Initial check
 
     // --- OpenGL Setup & Timer ---
-    glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 
     // --- Init UI & Callbacks ---
@@ -319,8 +331,7 @@ int main() {
     cout << "Loading shaders..." << endl;
     string vertexShaderCode = utility::loadShaderSource(VERTEX_SHADER_PATH);
     string fragmentShaderCode = utility::loadShaderSource(FRAGMENT_SHADER_PATH);
-    string pickingFragmentCode = utility::loadShaderSource(PICKING_SHADER_PATH);
-    if (vertexShaderCode.empty() || fragmentShaderCode.empty() || pickingFragmentCode.empty()) { cerr << "Failed to load shaders!" << endl; return -1; }
+    if (vertexShaderCode.empty() || fragmentShaderCode.empty()) { cerr << "Failed to load shaders!" << endl; return -1; }
     cout << "Shaders loaded." << endl;
 
 
@@ -328,8 +339,7 @@ int main() {
     cout << "Compiling shaders..." << endl;
     GLuint vertexShader = compileShader(GL_VERTEX_SHADER, vertexShaderCode);
     GLuint mainFragmentShader = compileShader(GL_FRAGMENT_SHADER, fragmentShaderCode);
-    GLuint pickingFragmentShader = compileShader(GL_FRAGMENT_SHADER, pickingFragmentCode);
-    if (!vertexShader || !mainFragmentShader || !pickingFragmentShader) { cerr << "Shader compilation failed." << endl; return -1; }
+    if (!vertexShader || !mainFragmentShader ) { cerr << "Shader compilation failed." << endl; return -1; }
     cout << "Shaders compiled." << endl;
 
 
@@ -339,20 +349,10 @@ int main() {
     if (shaderProgram == 0) { cerr << "Main program linking failed." << endl; /* Delete shaders? */ return -1; }
     cout << "Main program linked (ID: " << shaderProgram << ")." << endl;
 
-
-    // --- Link PICKING Program ---
-    cout << "Linking picking program..." << endl;
-    pickingShaderProgram = linkProgram(vertexShader, pickingFragmentShader);
-    if (pickingShaderProgram == 0) { cerr << "Picking program linking failed." << endl; /* Delete shaders? */ return -1; }
-    cout << "Picking program linked (ID: " << pickingShaderProgram << ")." << endl;
-
-
     // --- Delete individual shaders (no longer needed) ---
     cout << "Deleting individual shaders..." << endl;
     glDeleteShader(vertexShader);
     glDeleteShader(mainFragmentShader);
-    glDeleteShader(pickingFragmentShader);
-
 
     // --- Get NON-UBO Uniform Locations ---
     cout << "Getting non-UBO uniform locations..." << endl;
@@ -370,23 +370,8 @@ int main() {
     u_sdfCountLoc = glGetUniformLocation(shaderProgram, "u_sdfCount");
     u_selectedObjectIDLoc = glGetUniformLocation(shaderProgram, "u_selectedObjectID");
     glUseProgram(0);
+    cout << "Finished getting non-UBO uniform locations for main shader." << endl;
 
-
-    // Picking Program
-    glUseProgram(pickingShaderProgram);
-    pickingUniformLocs.clear(); // Clear map before repopulating
-    pickingUniformLocs["u_resolution"] = glGetUniformLocation(pickingShaderProgram, "u_resolution");
-    pickingUniformLocs["u_cameraPos"] = glGetUniformLocation(pickingShaderProgram, "u_cameraPos");
-    pickingUniformLocs["u_cameraBasis"] = glGetUniformLocation(pickingShaderProgram, "u_cameraBasis");
-    pickingUniformLocs["u_fov"] = glGetUniformLocation(pickingShaderProgram, "u_fov");
-    pickingUniformLocs["u_sdfCount"] = glGetUniformLocation(pickingShaderProgram, "u_sdfCount");
-    glUseProgram(0);
-
-    cout << "Finished getting non-UBO uniform locations." << endl;
-
-    // ... Before setupUBO() ...
-    std::cout << "Verifying SDFObjectGPUData size: " << sizeof(SDFObjectGPUData) << " bytes" << std::endl;
-    // Expected output: Verifying SDFObjectGPUData size: 112 bytes
 
     // --- Set up UBO (AFTER linking and getting other uniforms) ---
     setupUBO(); // Contains the block index query and binding
@@ -402,9 +387,9 @@ int main() {
     glBindVertexArray(0);
 
     int initialWidth, initialHeight; glfwGetFramebufferSize(window, &initialWidth, &initialHeight);
-    setupPickingFBO(initialWidth, initialHeight);
+    glfwGetFramebufferSize(window, &initialWidth, &initialHeight);
+    setupRenderFBO(initialWidth, initialHeight);
 
-    cout << "Quad and FBO setup complete." << endl;
 
     // --- Initialize SDF Objects ---
     cout << "Initializing SDF Objects..." << endl;
@@ -423,12 +408,10 @@ int main() {
     sdfObjects.push_back(box1);
 
 
-    /*// --- Gizmo State ---
-    ImGuizmo::OPERATION currentGizmoOperation = ImGuizmo::TRANSLATE;
-    ImGuizmo::MODE currentGizmoMode = ImGuizmo::WORLD;*/
-
+    // Initialize Transform Manager
     TransformManager transformManager(&camera,window);
-    g_transformManagerPtr = &transformManager;
+
+    camera.SetTransformManager(&transformManager);
 
 
     // --- Timing Variables ---
@@ -455,46 +438,51 @@ int main() {
         // --- Update UBO ---
         updateSDFUBOData();
 
-        // --- Begin ImGui/ImGuizmo Frame ---
+        // --- Begin ImGui Frame ---
         ui.newFrame();
-        /*ImGuizmo::BeginFrame();*/
 
         int display_w, display_h;
         glfwGetFramebufferSize(window, &display_w, &display_h);
         // --- Handle Inputs ---
         ImGuiIO& io = ImGui::GetIO();
 
-        // --- Update RAM Usage (Less Frequent) ---
-        if (frameCounter++ % ramUpdateInterval == 0) { currentRSS = utility::getCurrentRSS(); }
-
+        // -- Get UI Paramaters --
+        const RenderParams& params = ui.getParams(); // Get params for main render pass uniforms
 
         // -- Handle Inputs using TransformManager --
         TransformManager::InputResult inputResult = transformManager.update(sdfObjects, selectedObjectId);
 
+        // -- Handle picking request (reading from texture) --
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !inputResult.consumedMouse && !io.WantCaptureMouse) {
+            pickRequested = true;
+            double mouseX, mouseY;
+            glfwGetCursorPos(window, &mouseX, &mouseY);
+            pickMouseX = static_cast<int>(mouseX);
+            pickMouseY = static_cast<int>(mouseY);
+            std::cout << "Picking Requested in main.cpp at: " << pickMouseX << ", " << pickMouseY << std::endl; // Add debug print
+        }
 
         // -- Camera keyboard Movement --
         if (!inputResult.consumedKeyboard && !io.WantCaptureKeyboard) {
-            if (!io.WantCaptureMouse) {
-                camera.ProcessKeyboardMovement(window, static_cast<float>(deltaTime));
-            }
+            camera.ProcessKeyboardMovement(window, static_cast<float>(deltaTime));
         }
 
-        // --- Perform GPU Picking (if requested by previous frame's input) ---
-        if (!inputResult.consumedMouse) {
-            handlePickingRequest(display_w, display_h);
-        }
 
         // --- Setup for Main Render Pass Viewport & Aspect Ratio ---
+        glBindFramebuffer(GL_FRAMEBUFFER, renderFBO);
         glViewport(0, 0, display_w, display_h);
-        float aspectRatio = (display_w > 0 && display_h > 0) ? static_cast<float>(display_w) / static_cast<float>(display_h) : 1.0f;
 
+        // Set Draw Buffers specifically for this render pass
+        GLenum drawBuffers[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+        glDrawBuffers(2, drawBuffers);
+        glCheckError();
 
-        // --- Create ImGui UI Windows/Controls ---
-        const RenderParams& params = ui.getParams(); // Get params for main render pass uniforms
-        // Pass the last valid gpuFrameTimeNano reading
-        ui.createUI(camera.Fov, currentRSS,
-                      sdfObjects, selectedObjectId, nextSdfId, useGizmo);
-         // Check after UI logic
+        // Specify clear values for BOTH atttachments
+        glClearColor(params.clearColor[0], params.clearColor[1], params.clearColor[2],  1.0f);
+        GLint clearInt = -1;
+        glClearBufferiv(GL_COLOR, 1, &clearInt);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
 
         // --- Render Main SDF Scene ---
         glUseProgram(shaderProgram);
@@ -517,9 +505,35 @@ int main() {
         glBindVertexArray(quadVAO);
         glDrawArrays(GL_TRIANGLES, 0, 6);
         glBindVertexArray(0);
+        glUseProgram(0);
 
-        // --- Render ImGui Draw Data ---
-        // IMPORTANT: This should be inside the query if you want to measure UI render time
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+        handlePickingRequest(display_w, display_h);
+        glCheckError();
+
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, renderFBO);
+        glCheckError();
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        glCheckError();
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        glCheckError();
+        if (display_w > 0 && display_h > 0) {
+            glBlitFramebuffer(0, 0, display_w, display_h, 0, 0, display_w, display_h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            glCheckError(); // Check right after blit
+        }
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0); // Unbind completely
+
+        // --- Update RAM Usage (Less Frequent) ---
+        if (frameCounter++ % ramUpdateInterval == 0) { currentRSS = utility::getCurrentRSS(); }
+
+
+        // --- Create ImGui UI Windows/Controls ---
+        ui.createUI(camera.Fov, currentRSS,
+                      sdfObjects, selectedObjectId, nextSdfId, useGizmo);
+
+        glViewport(0, 0, display_w, display_h);
         ui.render();
 
         // --- Swap Buffers ---
@@ -528,5 +542,21 @@ int main() {
          // Final check for the frame
 
     }
+
+    cout << "Cleaning up..." << endl;
+    glDeleteVertexArrays(1, &quadVAO);
+    glDeleteBuffers(1, &quadVBO);
+    glDeleteProgram(shaderProgram);
+    glDeleteBuffers(1, &sdfDataUBO);
+
+    // Cleanup MRT FBO resources
+    if (renderFBO) glDeleteFramebuffers(1, &renderFBO);
+    if (colorTexture) glDeleteTextures(1, &colorTexture);
+    if (pickingTexture) glDeleteTextures(1, &pickingTexture);
+    if (depthRenderbuffer) glDeleteRenderbuffers(1, &depthRenderbuffer);
+
+    glfwTerminate();
+    cout << "Application terminated." << endl;
+    return 0;
 }
     // ======== End Render Loop ========

@@ -120,6 +120,11 @@ TransformManager::InputResult TransformManager::update(std::vector<SDFObject> &o
         if (confirmPressed) {
             confirmTransform();
             result.consumedMouse = true; // Consume the confirming left click
+            if (ImGui::IsKeyPressed(ImGuiKey_Enter)) { // If Enter was used, mark keyboard consumed too
+                result.consumedKeyboard = true;
+            }
+            return result; // Prevent further processing this frame
+
         } else if (cancelPressed) {
             TransformMode modeBeforeCancel = currentTransformMode;
             cancelTransform(transformingObjPtr);
@@ -127,12 +132,16 @@ TransformManager::InputResult TransformManager::update(std::vector<SDFObject> &o
             // For now, let's say Escape key press is consumed, but Right Mouse isn't always
             if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
                  result.consumedKeyboard = true;
-            } else if(ImGui::IsMouseClicked(ImGuiMouseButton_Right) && !io.WantCaptureMouse) {
-                 // Let parent decide if right-click is consumed based on context
-                 // result.consumedMouse = true; // Optional: consume right-click if desired
             }
+            if(ImGui::IsMouseClicked(ImGuiMouseButton_Right) && !io.WantCaptureMouse) {
+                 // Let parent decide if right-click is consumed based on context
+                 result.consumedMouse = true; //
+            }
+
+            return result;
+
         } else {
-            // --- Constraint / Space Toggles (Only if not confirmed/cancelled) ---
+            // --- Constraint / Space Toggles (Only if not confirmed/canceled) ---
             bool constraintChanged = false;
             GizmoAxis newlyPressedAxis = GizmoAxis::NONE;
             if (ImGui::IsKeyPressed(ImGuiKey_X)) newlyPressedAxis = GizmoAxis::X;

@@ -1,7 +1,9 @@
 #version 460 core
 
+// MULTIPLE OUTPUTS
+layout (location = 0) out vec4 out_color;
+layout (location = 1) out int out_ObjectID;
 
-out vec4 FragColor;
 in vec2 fragCoordScreen; // Input: Screen coords from vertex shader (-1 to 1)
 
 // Uniforms from CPU
@@ -157,14 +159,14 @@ vec3 applyLighting(vec3 hitPos, vec3 normal, vec3 baseColor, bool isSelected) {
     float diffuse = max(0.0, dot(normal, lightDir));
     vec3 ambient = vec3(0.1) * baseColor;
 
-    vec3 finalColor = ambient + baseColor * diffuse;
+    vec3 litColorWithHighlight  = ambient + baseColor * diffuse;
 
     // Add selection highlight
     if (isSelected) {
-        finalColor += vec3(0.2, 0.2, 0.0); // Slightly stronger yellow highlight
+        litColorWithHighlight += vec3(0.2, 0.2, 0.0); // Slightly stronger yellow highlight
     }
 
-    return clamp(finalColor, 0.0, 1.0);
+    return clamp(litColorWithHighlight , 0.0, 1.0);
 }
 
 
@@ -173,7 +175,7 @@ struct RayMarchResult {
     int steps;          // Number of Steps Taken
     bool hit;           // Did the ray hit anything?
     float finalDist;    // Distance from origin along ray to the hit point
-    int hitObjectID;    // ID of the object hit
+    int hitObjectIndex;    // ID of the object hit
     bool hitSelected;   // Was the hit object selected?
 };
 
@@ -213,48 +215,47 @@ void main()
     // Perform ray marching
     RayMarchResult result = rayMarch(ro, rd);
 
-    vec3 finalColor;
+    vec3 finalRenderColor;
 
     switch (u_debugMode) {
         case 1: // Show Steps
         float stepsNormalized = float(result.steps) / float(MAX_STEPS);
-        finalColor = vec3(stepsNormalized);
+        finalRenderColor = vec3(stepsNormalized);
         break;
         case 2: // Show Hit/Miss
-        finalColor = result.hit ? vec3(1.0) : vec3(0.0); // White for hit black for miss
+        finalRenderColor = result.hit ? vec3(1.0) : vec3(0.0); // White for hit black for miss
         break;
         case 3: // Show Normals
         if (result.hit){
             // Recalculate normal at the approximate hit position
             vec3 hitPos = ro + rd * result.finalDist;
             vec3 normal = calcNormal(hitPos,result.finalDist);
-            finalColor = normal * 0.5 + 0.5; // Map normal range [-1,1] to [0,1] for color
+            finalRenderColor = normal * 0.5 + 0.5; // Map normal range [-1,1] to [0,1] for color
         } else {
-            finalColor = vec3(0.0);
+            finalRenderColor = vec3(0.0);
         }
         break;
         case 4:
         if(result.hit){
             // Simple ha function to get varie colors from ID
-            float hue = fract(float(result.hitObjectID) * 0.61803398875);
+            float hue = fract(float(result.hitObjectIndex) * 0.61803398875);
             // imple HSV to RGB approximation
             vec3 hsv = vec3(hue, 0.8, 0.8);
             vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 1.0);
             vec3 p = abs(fract(hsv.xxx + K.xyz) * 6.0 - K.www);
-            finalColor = hsv.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), hsv.y);
+            finalRenderColor = hsv.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), hsv.y);
 
         } else {
-            finalColor = u_clearColor;
+            finalRenderColor = u_clearColor;
         }
         break;
 
         default: // Case 0 : normal rendering
-        finalColor = result.color;
+        finalRenderColor = result.color;
         break;
     }
 
-    // Output final color
-    FragColor = vec4(finalColor, 1.0);
-    // Gamma correction (simple version)
-    // FragColor = vec4(pow(color, vec3(1.0/2.2)), 1.0);
+    // Assign to Outputs
+    out_color = vec4(finalRenderColor, 1.0);
+    out_ObjectID = result.hitObjectIndex;
 }
